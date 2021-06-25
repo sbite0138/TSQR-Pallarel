@@ -1,0 +1,5 @@
+{
+    "C_Cpp.default.includePath": [
+        "./OpenBLAS-0.3.13/lapack-netlib/LAPACKE/include "
+    ]
+}
