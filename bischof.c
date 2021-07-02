@@ -86,74 +86,110 @@ double *gen_matrix(int m, int n, int lda)
     {
         for (size_t j = 0; j < n; ++j)
         {
-            a[j + lda * i] = (double)(rand()) / RAND_MAX;
+            a[j + lda * i] = 1.0 - 2.0 * (double)(rand()) / RAND_MAX;
             // printf("%ld %ld\n", i, j);
         }
     }
     return a;
 }
-
-void test()
+double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
 {
-    int n = 10;
-    double *a = gen_matrix(n, n, n);
-    double *b = malloc(sizeof(double) * n * n);
-    double *v = malloc(sizeof(double) * n * n);
-    double *vt = malloc(sizeof(double) * n * n);
+    double *V = malloc(sizeof(double) * m * n);
+    double *VT = malloc(sizeof(double) * m * n);
+    double *Q = malloc(sizeof(double) * m * m);
 
-    double *q = malloc(sizeof(double) * n * n);
-    double norm_a = calc_Frobenius_norm(n, n, a, n);
-    for (int i = 0; i < n; i++)
-    {
-        for (int j = 0; j < n; j++)
-        {
-            b[j + n * i] = a[j + n * i];
-            v[j + n * i] = 0.0;
-        }
-    }
-
-    print_matrix("A = ", n, n, a, n);
-
-    double *const t = calloc(n * n, sizeof(double));
-    LAPACKE_dgeqrt3(LAPACK_ROW_MAJOR, n, n, a, n, t, n);
-    for (int i = 0; i < n; i++)
+    for (int i = 0; i < m; i++)
     {
         for (int j = 0; j < n; j++)
         {
             if (i == j)
-                v[j + n * i] = 1.0;
+                V[j + n * i] = 1.0;
             else if (i > j)
             {
 
-                v[j + n * i] = a[j + n * i];
-                a[j + n * i] = 0.0;
+                V[j + n * i] = A[j + lda * i];
+            }
+            else
+            {
+                V[j + n * i] = 0.0;
             }
         }
     }
-    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, n, n, n, 1.0, v, n, t, n, 0.0, vt, n);
-    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, n, n, n, -1.0, vt, n, v, n, 0.0, q, n);
-    for (int i = 0; i < n; i++)
-    {
-        q[i + n * i] += 1.0;
-    }
-
-    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, n, n, n, 1.0, q, n, a, n, 0.0, vt, n);
+    print_matrix("A=", m, n, A, lda);
+    print_matrix("V=", m, n, V, n);
 
     // print_matrix("t= ", L, L, t, L + 1);
-    print_matrix("v=", n, n, v, n);
-    print_matrix("t=", n, n, t, n);
-    print_matrix("q=", n, n, q, n);
-    print_matrix("A = ", n, n, b, n);
-    print_matrix("qr=", n, n, vt, n);
+    // print_matrix("v=", n, n, v, n);
+    print_matrix("t=", n, n, T, ldt);
 
-    for (int i = 0; i < n; i++)
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, n, 1.0, V, n, T, ldt, 0.0, VT, n);
+
+    print_matrix("VT =", m, n, VT, ldt);
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, m, m, n, -1.0, VT, n, V, n, 0.0, Q, m);
+    for (int i = 0; i < m; i++)
+    {
+        Q[i + m * i] += 1.0;
+    }
+    free(V);
+    free(VT);
+    return Q;
+}
+
+void test()
+{
+    int m = 100;
+    int n = 5;
+    int lda = n + 1;
+    int ldt = n + 3;
+    double *a = gen_matrix(m, n, lda);
+    double *b = malloc(sizeof(double) * m * n);
+    double *v = malloc(sizeof(double) * m * n);
+    double *vt = malloc(sizeof(double) * m * n);
+
+    double *q; //= malloc(sizeof(double) * n * n);
+    double norm_a = calc_Frobenius_norm(m, n, a, lda);
+    for (int i = 0; i < m; i++)
+    {
+        for (int j = 0; j < n; j++)
+        {
+            b[j + n * i] = a[j + lda * i];
+            v[j + n * i] = 0.0;
+        }
+    }
+
+    // print_matrix("A = ", n, n, a, n);
+
+    double *const t = calloc(ldt * n, sizeof(double));
+    LAPACKE_dgeqrt3(LAPACK_ROW_MAJOR, m, n, a, lda, t, ldt);
+    q = construct_Q(m, n, a, lda, t, ldt);
+    for (int i = 0; i < m; i++)
+    {
+        for (int j = 0; j < n; j++)
+        {
+            if (i > j)
+            {
+
+                a[j + lda * i] = 0;
+            }
+        }
+    }
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, m, 1.0, q, m, a, lda, 0.0, vt, n);
+
+    // print_matrix("t= ", L, L, t, L + 1);
+    // print_matrix("v=", n, n, v, n);
+    // print_matrix("t=", n, n, t, n);
+    print_matrix("q=", m, m, q, m);
+    print_matrix("A = ", m, n, b, n);
+    print_matrix("qr=", m, n, vt, n);
+
+    for (int i = 0; i < m; i++)
     {
         for (int j = 0; j < n; j++)
         {
             b[j + n * i] -= vt[j + n * i];
         }
     }
-    double norm_qr = calc_Frobenius_norm(n, n, b, n);
+    double norm_qr = calc_Frobenius_norm(m, n, b, n);
     printf("error = %e\n", norm_qr / norm_a);
     free(t);
 }
