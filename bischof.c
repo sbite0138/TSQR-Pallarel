@@ -1,9 +1,9 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <assert.h>
-#include <omp.h> // for a timing routine.
 #include <cblas.h>
 #include <lapacke.h>
+#include <omp.h> // for a timing routine.
+#include <stdio.h>
+#include <stdlib.h>
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 void print_matrix(char *msg, int m, int n, double *a, int lda)
 {
@@ -73,16 +73,16 @@ void bischof(int matrix_layout, int N, double *a, int lda)
     int nb = 2;
     assert(MIN(N, L) >= nb && nb >= 1);
     int ldt = L;
-    assert(ldt >= L);
+    assert(ldt >= nb);
 
     assert(N % L == 0);
     for (int k = 0; k < N / L; k++)
     {
 
-        double *const t = calloc(ldt * MIN(N, L), sizeof(double));
+        double *const t = calloc(ldt * nb, sizeof(double));
         int Nk = (N / L - k) * L;
         printf("%d\n", ldt);
-        LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, Nk, L, nb, a, lda, t, ldt);
+        LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, Nk, L, nb, &a[k * L + lda * k * L], lda, t, ldt);
         // print_matrix("t= ", L, L, t, L + 1);
         printf("ok %p\n", t);
         free(t);
