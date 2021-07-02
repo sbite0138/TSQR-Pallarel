@@ -72,8 +72,8 @@ void bischof(int matrix_layout, int N, double *a, int lda)
     int L = 10;
     int nb = 2;
     assert(MIN(N, L) >= nb && nb >= 1);
-    int ldt = nb;
-    assert(ldt >= nb);
+    int ldt = L;
+    assert(ldt >= L);
 
     assert(N % L == 0);
     for (int k = 0; k < N / L; k++)
@@ -82,7 +82,7 @@ void bischof(int matrix_layout, int N, double *a, int lda)
         double *const t = calloc(ldt * MIN(N, L), sizeof(double));
         int Nk = (N / L - k) * L;
         printf("%d\n", ldt);
-        LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, N, L, nb, a, lda, t, ldt);
+        LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, Nk, L, nb, a, lda, t, ldt);
         // print_matrix("t= ", L, L, t, L + 1);
         printf("ok %p\n", t);
         free(t);
