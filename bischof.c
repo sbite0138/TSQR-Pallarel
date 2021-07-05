@@ -81,7 +81,9 @@ double calc_Frobenius_norm(int m, int n, double *a, int lda)
 double *gen_matrix(int m, int n, int lda)
 {
     assert(lda >= n);
+    printf("%d\n", sizeof(double) * m * lda);
     double *a = malloc(sizeof(double) * m * lda);
+
     for (size_t i = 0; i < m; ++i)
     {
         for (size_t j = 0; j < n; ++j)
@@ -124,7 +126,7 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
 
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, n, 1.0, V, n, T, ldt, 0.0, VT, n);
 
-    print_matrix("VT =", m, n, VT, ldt);
+    print_matrix("VT =", m, n, VT, n);
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, m, m, n, -1.0, VT, n, V, n, 0.0, Q, m);
     for (int i = 0; i < m; i++)
     {
@@ -192,6 +194,11 @@ void test()
     double norm_qr = calc_Frobenius_norm(m, n, b, n);
     printf("error = %e\n", norm_qr / norm_a);
     free(t);
+    free(a);
+    free(b);
+    free(q);
+    free(v);
+    free(vt);
 }
 
 // QR分解はLAPACKを使って大丈夫
@@ -267,7 +274,8 @@ int main(void)
 {
     unsigned long const random_seed = 10;
     printf("%ld\n", time(NULL));
-    sranddev(); //srand(time(NULL));だと最初のrand()の返り値が偏る cf:https://stackoverflow.com/questions/32489058/trouble-generating-random-numbers-in-c-on-a-mac-using-xcode
+    //sranddev(); //srand(time(NULL));だと最初のrand()の返り値が偏る cf:https://stackoverflow.com/questions/32489058/trouble-generating-random-numbers-in-c-on-a-mac-using-xcode
+    srand(time(NULL));
     printf("%lf\n", (double)(rand()) / RAND_MAX);
     test();
     //return 0;
@@ -292,5 +300,7 @@ int main(void)
     double const t2 = omp_get_wtime();
     print_matrix("res=", m, m, a, lda);
     //    print_matrix("t=", n, n, t, ldt);
+    printf("END\n");
+    free(a);
     return EXIT_SUCCESS;
 }
