@@ -160,7 +160,7 @@ void test()
     // print_matrix("A = ", n, n, a, n);
 
     double *const t = calloc(ldt * n, sizeof(double));
-    LAPACKE_dgeqrt3(LAPACK_ROW_MAJOR, m, n, a, lda, t, ldt);
+    LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, m, n, n, a, lda, t, ldt);
     q = construct_Q(m, n, a, lda, t, ldt);
     for (int i = 0; i < m; i++)
     {
@@ -199,7 +199,7 @@ void test()
 //https://www.hpc.nec/documents/sdk/SDK_NLC/UsersGuide/man/dsyr2k.html
 void bischof(int matrix_layout, int N, double *a, int lda)
 {
-    int L = 10;
+    int L = 3;
     int nb = L;
     assert(L % nb == 0);
     assert(MIN(N, L) >= nb && nb >= 1);
@@ -211,13 +211,53 @@ void bischof(int matrix_layout, int N, double *a, int lda)
     {
 
         double *const t = calloc(ldt * nb, sizeof(double));
-        int Nk = (N / L - k + 1) * L;
-        printf("%d\n", ldt);
-        LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, Nk, L, nb, &a[k * L + lda * k * L], lda, t, ldt);
+        int Nk = N - L - k * L;
+        LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, Nk, L, L, &a[k * L + lda * (k + 1) * L], lda, t, ldt);
+        //double *tmp = construct_Q(Nk, L, &a[k * L + lda * k * L], lda, t, ldt);
+        //   double *Q = malloc(sizeof(double) * N * N);
+        // double *b = malloc(sizeof(double) * N * N);
+
+        for (int i = L * k + L; i < N; i++)
+        {
+            printf("i = %d\n", i);
+            printf("j = %d to %d\n", Nk - L, Nk);
+
+            for (int j = L * k; j < L * (k + 1); j++)
+            {
+                printf("%d %d\n", i, j);
+                if (i > j + L)
+                {
+                    a[j + i * lda] = a[i + j * lda] = 0.0;
+                }
+            }
+        }
+        print_matrix("a =", N, N, a, lda);
+
+        // for (int i = 0; i < N; i++)
+        // {
+        //     for (int j = 0; j < N; j++)
+        //     {
+        //         if (i < N - Nk || j < N - Nk)
+        //         {
+        //             if (i == j)
+        //             {
+        //                 Q[j * i * N] = 1.0;
+        //             }
+        //             else
+        //             {
+        //                 Q[j * i * N] = 0.0;
+        //             }
+        //         }
+        //         else
+        //         {
+        //             Q[j + i * N] = tmp[(j - (N - Nk)) + (i - (N - Nk)) * Nk];
+        //         }
+        //     }
+        //        }
         // print_matrix("t= ", L, L, t, L + 1);
         printf("ok %p\n", t);
 
-        print_matrix("t=", nb, L, t, ldt);
+        print_matrix("a=", N, N, a, lda);
         free(t);
     }
     printf("ok");
@@ -230,7 +270,7 @@ int main(void)
     sranddev(); //srand(time(NULL));だと最初のrand()の返り値が偏る cf:https://stackoverflow.com/questions/32489058/trouble-generating-random-numbers-in-c-on-a-mac-using-xcode
     printf("%lf\n", (double)(rand()) / RAND_MAX);
     test();
-    return 0;
+    //return 0;
     size_t const m = 30;
 
     size_t const lda = m + 4;
@@ -240,7 +280,7 @@ int main(void)
     {
         for (size_t j = 0; j < m; ++j)
         {
-            a[j + lda * i] = (double)(rand()) / RAND_MAX;
+            a[j + lda * i] = a[i + j * lda] = (double)(rand()) / RAND_MAX;
             // printf("%ld %ld\n", i, j);
         }
     }
