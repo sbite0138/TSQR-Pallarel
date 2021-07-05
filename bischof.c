@@ -96,6 +96,7 @@ double *gen_matrix(int m, int n, int lda)
 }
 double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
 {
+    printf("in construct Q\n");
     double *V = malloc(sizeof(double) * m * n);
     double *VT = malloc(sizeof(double) * m * n);
     double *Q = malloc(sizeof(double) * m * m);
@@ -134,6 +135,8 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
     }
     free(V);
     free(VT);
+    printf("out construct Q\n");
+
     return Q;
 }
 
@@ -204,7 +207,7 @@ void test()
 // QR分解はLAPACKを使って大丈夫
 
 //https://www.hpc.nec/documents/sdk/SDK_NLC/UsersGuide/man/dsyr2k.html
-void bischof(int matrix_layout, int N, double *a, int lda)
+void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
 {
     int L = 3;
     int nb = L;
@@ -212,15 +215,48 @@ void bischof(int matrix_layout, int N, double *a, int lda)
     assert(MIN(N, L) >= nb && nb >= 1);
     int ldt = L;
     assert(ldt >= nb);
+    double *Qnext = malloc(N * N * sizeof(double));
+    double *Qtmp = malloc(N * N * sizeof(double));
+    for (int i = 0; i < N; i++)
+    {
+        for (int j = 0; j < N; j++)
+        {
+            Q[j + i * N] = (i == j ? 1.0 : 0.0);
+        }
+    }
 
     assert(N % L == 0);
-    for (int k = 0; k < N / L - 1; k++)
+    //    for (int k = 0; k < N / L - 1; k++)
+    for (int k = 0; k < 1; k++)
     {
 
         double *const t = calloc(ldt * nb, sizeof(double));
         int Nk = N - L - k * L;
         LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, Nk, L, L, &a[k * L + lda * (k + 1) * L], lda, t, ldt);
-        //double *tmp = construct_Q(Nk, L, &a[k * L + lda * k * L], lda, t, ldt);
+        double *tmp = construct_Q(Nk, L, &a[k * L + lda * (k + 1) * L], lda, t, ldt);
+        print_matrix("tmp = ", Nk, Nk, tmp, Nk);
+
+        for (int i = 0; i < N; i++)
+        {
+            for (int j = 0; j < N; j++)
+            {
+                if (i < L * (k + 1) || j < (L * (k + 1)))
+                    Qnext[j + i * N] = (i == j ? 1.0 : 0.0);
+                else
+                    Qnext[j + i * N] = tmp[(j - L * (k + 1)) + (i - L * (k + 1)) * Nk];
+            }
+        }
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, N, N, N, 1.0, Qnext, N, Q, N, 0.0, Qtmp, N);
+        for (int i = 0; i < N; i++)
+        {
+            for (int j = 0; j < N; j++)
+            {
+                Q[j + i * N] = Qtmp[j + i * N];
+            }
+        }
+        print_matrix("Q = ", N, N, Q, N);
+
+        free(tmp);
         //   double *Q = malloc(sizeof(double) * N * N);
         // double *b = malloc(sizeof(double) * N * N);
 
@@ -235,6 +271,10 @@ void bischof(int matrix_layout, int N, double *a, int lda)
                 if (i > j + L)
                 {
                     a[j + i * lda] = a[i + j * lda] = 0.0;
+                }
+                else
+                {
+                    a[i + j * lda] = a[j + i * lda];
                 }
             }
         }
@@ -267,6 +307,9 @@ void bischof(int matrix_layout, int N, double *a, int lda)
         print_matrix("a=", N, N, a, lda);
         free(t);
     }
+    free(Qtmp);
+    free(Qnext);
+
     printf("ok");
 }
 
@@ -277,13 +320,15 @@ int main(void)
     //sranddev(); //srand(time(NULL));だと最初のrand()の返り値が偏る cf:https://stackoverflow.com/questions/32489058/trouble-generating-random-numbers-in-c-on-a-mac-using-xcode
     srand(time(NULL));
     printf("%lf\n", (double)(rand()) / RAND_MAX);
-    test();
+    // test();
     //return 0;
     size_t const m = 30;
 
     size_t const lda = m + 4;
 
     double *const a = malloc(sizeof(double) * m * lda);
+    double *const b = malloc(sizeof(double) * m * lda);
+
     for (size_t i = 0; i < m; ++i)
     {
         for (size_t j = 0; j < m; ++j)
@@ -292,15 +337,34 @@ int main(void)
             // printf("%ld %ld\n", i, j);
         }
     }
+    for (size_t i = 0; i < m; ++i)
+    {
+        for (size_t j = 0; j < m; ++j)
+        {
+            b[j + lda * i] = a[j + i * lda];
+            // printf("%ld %ld\n", i, j);
+        }
+    }
+    double *Q = malloc(m * m * sizeof(double));
+
     print_matrix("A= ", m, m, a, lda);
     double const t1 = omp_get_wtime();
     /* ----------------- START ----------------- */
-    bischof(LAPACK_ROW_MAJOR, m, a, lda);
+    bischof(LAPACK_ROW_MAJOR, m, a, lda, Q);
     /* ----------------- END ----------------- */
     double const t2 = omp_get_wtime();
     print_matrix("res=", m, m, a, lda);
+    print_matrix("Q=", m, m, Q, m);
+
+    cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, b, lda, 0.0, a, lda);
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, m, m, 1.0, a, lda, Q, m, 0.0, b, lda);
+    print_matrix("b =", m, m, b, lda);
+
     //    print_matrix("t=", n, n, t, ldt);
     printf("END\n");
+
     free(a);
+    free(b);
+    free(Q);
     return EXIT_SUCCESS;
 }
