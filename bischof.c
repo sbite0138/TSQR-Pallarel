@@ -88,7 +88,7 @@ double *gen_matrix(int m, int n, int lda)
     {
         for (size_t j = 0; j < n; ++j)
         {
-            a[j + lda * i] = 1.0 - 2.0 * (double)(rand()) / RAND_MAX;
+            a[j + lda * i] = 10.0 - 20.0 * (double)(rand()) / RAND_MAX;
             // printf("%ld %ld\n", i, j);
         }
     }
@@ -119,15 +119,15 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
         }
     }
     print_matrix("A=", m, n, A, lda);
-    print_matrix("V=", m, n, V, n);
+    //    print_matrix("V=", m, n, V, n);
 
     // print_matrix("t= ", L, L, t, L + 1);
     // print_matrix("v=", n, n, v, n);
-    print_matrix("t=", n, n, T, ldt);
+    // print_matrix("t=", n, n, T, ldt);
 
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, n, 1.0, V, n, T, ldt, 0.0, VT, n);
 
-    print_matrix("VT =", m, n, VT, n);
+    // print_matrix("VT =", m, n, VT, n);
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, m, m, n, -1.0, VT, n, V, n, 0.0, Q, m);
     for (int i = 0; i < m; i++)
     {
@@ -209,7 +209,7 @@ void test()
 //https://www.hpc.nec/documents/sdk/SDK_NLC/UsersGuide/man/dsyr2k.html
 void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
 {
-    int L = 3;
+    int L = 2;
     int nb = L;
     assert(L % nb == 0);
     assert(MIN(N, L) >= nb && nb >= 1);
@@ -226,14 +226,16 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
     }
 
     assert(N % L == 0);
-    //    for (int k = 0; k < N / L - 1; k++)
-    for (int k = 0; k < 1; k++)
+    for (int k = 0; k < N / L - 1; k++)
+    //for (int k = 0; k < 1; k++)
     {
 
         double *const t = calloc(ldt * nb, sizeof(double));
         int Nk = N - L - k * L;
         LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, Nk, L, L, &a[k * L + lda * (k + 1) * L], lda, t, ldt);
         double *tmp = construct_Q(Nk, L, &a[k * L + lda * (k + 1) * L], lda, t, ldt);
+        double *tmp2 = malloc(Nk * Nk * sizeof(double));
+
         print_matrix("tmp = ", Nk, Nk, tmp, Nk);
 
         for (int i = 0; i < N; i++)
@@ -246,7 +248,8 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
                     Qnext[j + i * N] = tmp[(j - L * (k + 1)) + (i - L * (k + 1)) * Nk];
             }
         }
-        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, N, N, N, 1.0, Qnext, N, Q, N, 0.0, Qtmp, N);
+        print_matrix("Qnext = ", N, N, Qnext, N);
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, N, N, N, 1.0, Q, N, Qnext, N, 0.0, Qtmp, N);
         for (int i = 0; i < N; i++)
         {
             for (int j = 0; j < N; j++)
@@ -256,18 +259,17 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
         }
         print_matrix("Q = ", N, N, Q, N);
 
-        free(tmp);
         //   double *Q = malloc(sizeof(double) * N * N);
         // double *b = malloc(sizeof(double) * N * N);
 
         for (int i = L * k + L; i < N; i++)
         {
-            printf("i = %d\n", i);
-            printf("j = %d to %d\n", Nk - L, Nk);
+            // printf("i = %d\n", i);
+            // printf("j = %d to %d\n", Nk - L, Nk);
 
             for (int j = L * k; j < L * (k + 1); j++)
             {
-                printf("%d %d\n", i, j);
+                // printf("%d %d\n", i, j);
                 if (i > j + L)
                 {
                     a[j + i * lda] = a[i + j * lda] = 0.0;
@@ -278,6 +280,15 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
                 }
             }
         }
+
+        print_matrix("A_part = ", Nk, Nk, &a[(k + 1) * L + lda * (k + 1) * L], lda);
+        print_matrix("tmp = ", Nk, Nk, tmp, Nk);
+
+        cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, Nk, Nk, Nk, 1.0, tmp, Nk, &a[(k + 1) * L + lda * (k + 1) * L], lda, 0.0, tmp2, Nk);
+
+        print_matrix("tmp2 = ", Nk, Nk, tmp2, Nk);
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nk, Nk, Nk, 1.0, tmp2, Nk, tmp, Nk, 0.0, &a[(k + 1) * L + lda * (k + 1) * L], lda);
+
         print_matrix("a =", N, N, a, lda);
 
         // for (int i = 0; i < N; i++)
@@ -302,9 +313,9 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
         //     }
         //        }
         // print_matrix("t= ", L, L, t, L + 1);
-        printf("ok %p\n", t);
+        free(tmp);
+        free(tmp2);
 
-        print_matrix("a=", N, N, a, lda);
         free(t);
     }
     free(Qtmp);
@@ -316,13 +327,12 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
 int main(void)
 {
     unsigned long const random_seed = 10;
-    printf("%ld\n", time(NULL));
     //sranddev(); //srand(time(NULL));だと最初のrand()の返り値が偏る cf:https://stackoverflow.com/questions/32489058/trouble-generating-random-numbers-in-c-on-a-mac-using-xcode
-    srand(time(NULL));
+    srand(random_seed);
     printf("%lf\n", (double)(rand()) / RAND_MAX);
     // test();
     //return 0;
-    size_t const m = 30;
+    size_t const m = 80;
 
     size_t const lda = m + 4;
 
@@ -333,7 +343,7 @@ int main(void)
     {
         for (size_t j = 0; j < m; ++j)
         {
-            a[j + lda * i] = a[i + j * lda] = (double)(rand()) / RAND_MAX;
+            a[j + lda * i] = a[i + j * lda] = 10.0 * (double)(rand()) / RAND_MAX;
             // printf("%ld %ld\n", i, j);
         }
     }
@@ -355,6 +365,8 @@ int main(void)
     double const t2 = omp_get_wtime();
     print_matrix("res=", m, m, a, lda);
     print_matrix("Q=", m, m, Q, m);
+    cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, Q, m, 0.0, a, lda);
+    print_matrix("QQ^T =", m, m, a, lda);
 
     cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, b, lda, 0.0, a, lda);
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, m, m, 1.0, a, lda, Q, m, 0.0, b, lda);
