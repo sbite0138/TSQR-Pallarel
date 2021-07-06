@@ -9,6 +9,7 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 void print_matrix(char *msg, int m, int n, double *a, int lda)
 {
+    return;
     printf("================================\n");
     printf("%s\n", msg);
     printf("[\n");
@@ -209,7 +210,7 @@ void test()
 //https://www.hpc.nec/documents/sdk/SDK_NLC/UsersGuide/man/dsyr2k.html
 void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
 {
-    int L = 2;
+    int L = 200;
     int nb = L;
     assert(L % nb == 0);
     assert(MIN(N, L) >= nb && nb >= 1);
@@ -332,18 +333,19 @@ int main(void)
     printf("%lf\n", (double)(rand()) / RAND_MAX);
     // test();
     //return 0;
-    size_t const m = 80;
+    size_t const m = 3000;
 
     size_t const lda = m + 4;
 
     double *const a = malloc(sizeof(double) * m * lda);
     double *const b = malloc(sizeof(double) * m * lda);
+    double *const tmp = malloc(sizeof(double) * m * lda);
 
     for (size_t i = 0; i < m; ++i)
     {
         for (size_t j = 0; j < m; ++j)
         {
-            a[j + lda * i] = a[i + j * lda] = 10.0 * (double)(rand()) / RAND_MAX;
+            a[j + lda * i] = a[i + j * lda] = 1.0 * (double)(rand()) / RAND_MAX;
             // printf("%ld %ld\n", i, j);
         }
     }
@@ -358,6 +360,7 @@ int main(void)
     double *Q = malloc(m * m * sizeof(double));
 
     print_matrix("A= ", m, m, a, lda);
+    double norm_a = calc_Frobenius_norm(m, m, a, lda);
     double const t1 = omp_get_wtime();
     /* ----------------- START ----------------- */
     bischof(LAPACK_ROW_MAJOR, m, a, lda, Q);
@@ -365,18 +368,31 @@ int main(void)
     double const t2 = omp_get_wtime();
     print_matrix("res=", m, m, a, lda);
     print_matrix("Q=", m, m, Q, m);
-    cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, Q, m, 0.0, a, lda);
-    print_matrix("QQ^T =", m, m, a, lda);
+    //cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, Q, m, 0.0, a, lda);
+    //print_matrix("QQ^T =", m, m, a, lda);
+    //printf("norm of QQ^T = %lf\n", calc_Frobenius_norm(m, m, a, lda));
+    // cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, b, lda, 0.0, a, lda);
+    // cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, m, m, 1.0, a, lda, Q, m, 0.0, b, lda);
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, m, m, 1.0, Q, m, a, lda, 0.0, tmp, lda);
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, m, m, m, 1.0, tmp, lda, Q, m, 0.0, a, lda);
+    print_matrix("a =", m, m, a, lda);
+    for (size_t i = 0; i < m; ++i)
+    {
+        for (size_t j = 0; j < m; ++j)
+        {
+            b[j + lda * i] -= a[j + i * lda];
+        }
+    }
 
-    cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, b, lda, 0.0, a, lda);
-    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, m, m, 1.0, a, lda, Q, m, 0.0, b, lda);
     print_matrix("b =", m, m, b, lda);
 
+    printf("norm  = %lf\n", calc_Frobenius_norm(m, m, b, lda) / norm_a);
     //    print_matrix("t=", n, n, t, ldt);
     printf("END\n");
 
     free(a);
     free(b);
+    free(tmp);
     free(Q);
     return EXIT_SUCCESS;
 }
