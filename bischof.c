@@ -9,7 +9,6 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 void print_matrix(char *msg, int m, int n, double *a, int lda)
 {
-    return;
     printf("================================\n");
     printf("%s\n", msg);
     printf("[\n");
@@ -95,6 +94,7 @@ double *gen_matrix(int m, int n, int lda)
     }
     return a;
 }
+
 double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
 {
     printf("in construct Q\n");
@@ -210,7 +210,7 @@ void test()
 //https://www.hpc.nec/documents/sdk/SDK_NLC/UsersGuide/man/dsyr2k.html
 void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
 {
-    int L = 200;
+    int L = 2;
     int nb = L;
     assert(L % nb == 0);
     assert(MIN(N, L) >= nb && nb >= 1);
@@ -233,12 +233,13 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
 
         double *const t = calloc(ldt * nb, sizeof(double));
         int Nk = N - L - k * L;
+
         LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, Nk, L, L, &a[k * L + lda * (k + 1) * L], lda, t, ldt);
+        // print_matrix("qr a =", N, N, a, lda);
+
+        /// construct Q
         double *tmp = construct_Q(Nk, L, &a[k * L + lda * (k + 1) * L], lda, t, ldt);
         double *tmp2 = malloc(Nk * Nk * sizeof(double));
-
-        print_matrix("tmp = ", Nk, Nk, tmp, Nk);
-
         for (int i = 0; i < N; i++)
         {
             for (int j = 0; j < N; j++)
@@ -249,7 +250,7 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
                     Qnext[j + i * N] = tmp[(j - L * (k + 1)) + (i - L * (k + 1)) * Nk];
             }
         }
-        print_matrix("Qnext = ", N, N, Qnext, N);
+        // print_matrix("Qnext = ", N, N, Qnext, N);
         cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, N, N, N, 1.0, Q, N, Qnext, N, 0.0, Qtmp, N);
         for (int i = 0; i < N; i++)
         {
@@ -258,19 +259,43 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
                 Q[j + i * N] = Qtmp[j + i * N];
             }
         }
-        print_matrix("Q = ", N, N, Q, N);
+        // print_matrix("Q = ", N, N, Q, N);
+        free(tmp);
+        free(tmp2);
+        // construct Q done
 
-        //   double *Q = malloc(sizeof(double) * N * N);
-        // double *b = malloc(sizeof(double) * N * N);
+        // update A
+        double *V = malloc(Nk * L * sizeof(double));
+        double *update_tmp = malloc(Nk * Nk * sizeof(double));
+        double *update_P = malloc(Nk * L * sizeof(double));
+        double *update_beta = malloc(L * L * sizeof(double));
+        double *update_Q = malloc(Nk * L * sizeof(double));
+
+        double *a_part = &a[k * L + lda * (k + 1) * L];
+        for (int i = 0; i < Nk; i++)
+        {
+            for (int j = 0; j < L; j++)
+            {
+                if (i == j)
+                {
+                    V[j + i * L] = 1.0;
+                }
+                else if (i > j)
+                {
+                    V[j + i * L] = a_part[j + i * lda];
+                }
+                else
+                {
+                    V[j + i * L] = 0.0;
+                }
+            }
+        }
+        //print_matrix("V= ", Nk, L, V, L);
 
         for (int i = L * k + L; i < N; i++)
         {
-            // printf("i = %d\n", i);
-            // printf("j = %d to %d\n", Nk - L, Nk);
-
             for (int j = L * k; j < L * (k + 1); j++)
             {
-                // printf("%d %d\n", i, j);
                 if (i > j + L)
                 {
                     a[j + i * lda] = a[i + j * lda] = 0.0;
@@ -282,47 +307,54 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
             }
         }
 
-        print_matrix("A_part = ", Nk, Nk, &a[(k + 1) * L + lda * (k + 1) * L], lda);
-        print_matrix("tmp = ", Nk, Nk, tmp, Nk);
+        // print_matrix("sym a =", N, N, a, lda);
+        // construct P
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nk, L, Nk, 1.0, &a[(k + 1) * L + lda * (k + 1) * L], lda, V, L, 0.0, update_tmp, Nk);
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, 1.0, update_tmp, Nk, t, ldt, 0.0, update_P, L);
 
-        cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, Nk, Nk, Nk, 1.0, tmp, Nk, &a[(k + 1) * L + lda * (k + 1) * L], lda, 0.0, tmp2, Nk);
+        // construct beta
+        cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, L, L, Nk, 0.5, V, L, update_P, L, 0.0, update_tmp, Nk);
+        cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, L, L, L, 1.0, t, ldt, update_tmp, Nk, 0.0, update_beta, L);
 
-        print_matrix("tmp2 = ", Nk, Nk, tmp2, Nk);
-        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nk, Nk, Nk, 1.0, tmp2, Nk, tmp, Nk, 0.0, &a[(k + 1) * L + lda * (k + 1) * L], lda);
+        // construct Q
+        for (int i = 0; i < Nk; i++)
+        {
+            for (int j = 0; j < L; j++)
+            {
+                update_Q[j + i * L] = update_P[j + i * L];
+            }
+        }
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, -1.0, V, L, update_beta, L, 1.0, update_Q, L);
 
-        print_matrix("a =", N, N, a, lda);
+        print_matrix("before a =", N, N, a, lda);
+        // rank-2k update
+        cblas_dsyr2k(CblasRowMajor, CblasUpper, CblasNoTrans, Nk, L, -1.0, V, L, update_Q, L, 1.0, &a[(k + 1) * L + lda * (k + 1) * L], lda);
 
-        // for (int i = 0; i < N; i++)
-        // {
-        //     for (int j = 0; j < N; j++)
-        //     {
-        //         if (i < N - Nk || j < N - Nk)
-        //         {
-        //             if (i == j)
-        //             {
-        //                 Q[j * i * N] = 1.0;
-        //             }
-        //             else
-        //             {
-        //                 Q[j * i * N] = 0.0;
-        //             }
-        //         }
-        //         else
-        //         {
-        //             Q[j + i * N] = tmp[(j - (N - Nk)) + (i - (N - Nk)) * Nk];
-        //         }
-        //     }
-        //        }
-        // print_matrix("t= ", L, L, t, L + 1);
-        free(tmp);
-        free(tmp2);
+        // DGEMM update
+        // cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, Nk, Nk, Nk, 1.0, tmp, Nk, &a[(k + 1) * L + lda * (k + 1) * L], lda, 0.0, tmp2, Nk);
+        //cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nk, Nk, Nk, 1.0, tmp2, Nk, tmp, Nk, 0.0, &a[(k + 1) * L + lda * (k + 1) * L], lda);
+
+        for (int i = 0; i < N; i++)
+        {
+            for (int j = i; j < N; j++)
+            {
+                a[i + j * lda] = a[j + i * lda];
+            }
+        }
+
+        //print_matrix("after a =", N, N, a, lda);
+        free(update_P);
+        free(update_beta);
+        free(update_Q);
+        free(update_tmp);
+        //print_matrix("@A = ", N, N, a, lda);
+
+        free(V);
 
         free(t);
     }
     free(Qtmp);
     free(Qnext);
-
-    printf("ok");
 }
 
 int main(void)
@@ -333,7 +365,7 @@ int main(void)
     printf("%lf\n", (double)(rand()) / RAND_MAX);
     // test();
     //return 0;
-    size_t const m = 3000;
+    size_t const m = 100;
 
     size_t const lda = m + 4;
 
@@ -368,9 +400,9 @@ int main(void)
     double const t2 = omp_get_wtime();
     print_matrix("res=", m, m, a, lda);
     print_matrix("Q=", m, m, Q, m);
-    //cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, Q, m, 0.0, a, lda);
-    //print_matrix("QQ^T =", m, m, a, lda);
-    //printf("norm of QQ^T = %lf\n", calc_Frobenius_norm(m, m, a, lda));
+    cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, Q, m, 0.0, tmp, lda);
+    print_matrix("QQ^T =", m, m, tmp, lda);
+    printf("norm of QQ^T = %e\n", calc_Frobenius_norm(m, m, tmp, lda) / sqrt(m));
     // cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, b, lda, 0.0, a, lda);
     // cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, m, m, 1.0, a, lda, Q, m, 0.0, b, lda);
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, m, m, 1.0, Q, m, a, lda, 0.0, tmp, lda);
@@ -386,7 +418,7 @@ int main(void)
 
     print_matrix("b =", m, m, b, lda);
 
-    printf("norm  = %lf\n", calc_Frobenius_norm(m, m, b, lda) / norm_a);
+    printf("norm  = %e\n", calc_Frobenius_norm(m, m, b, lda) / norm_a);
     //    print_matrix("t=", n, n, t, ldt);
     printf("END\n");
 

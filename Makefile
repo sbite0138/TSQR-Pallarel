@@ -1,9 +1,9 @@
 UNAME := $(shell uname)
 ifeq ($(UNAME), Darwin)
-CC = /opt/homebrew/bin/gcc-11  -std=c11 -Wall -Wextra -g -march=native -funroll-loops -fopenmp
+CC = /opt/homebrew/bin/gcc-11  -std=c11 -Wall -Wextra -O3 -march=native -funroll-loops -fopenmp
 else
 ifeq ($(UNAME), Linux)
-CC = gcc -std=c11 -Wall -Wextra -g -march=native -funroll-loops -fopenmp -fsanitize=address
+CC = gcc -std=c11 -Wall -Wextra -O3 -march=native -funroll-loops -fopenmp -fsanitize=address
 endif
 endif
 OPENBLAS_DIR = ./OpenBLAS-0.3.13
