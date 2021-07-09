@@ -9,6 +9,7 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 void print_matrix(char *msg, int m, int n, double *a, int lda)
 {
+    return;
     printf("================================\n");
     printf("%s\n", msg);
     printf("[\n");
@@ -48,11 +49,11 @@ void construct_Q_from_compact_WY(int m, int n, double *Y, double *T, int ldy, in
             T[j + i * ldt] = 0.0;
         }
     }
-    print_matrix("Y=", m, n, Y, ldy);
-    print_matrix("T=", n, n, T, ldt);
+    // print_matrix("Y=", m, n, Y, ldy);
+    // print_matrix("T=", n, n, T, ldt);
 
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, n, 1.0, Y, ldy, T, ldt, 0.0, YT, n);
-    print_matrix("YT=", m, n, YT, n);
+    // print_matrix("YT=", m, n, YT, n);
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, m, m, n, 1.0, YT, n, Y, ldy, 0.0, Q, m);
     for (int i = 0; i < m; i++)
     {
@@ -61,7 +62,7 @@ void construct_Q_from_compact_WY(int m, int n, double *Y, double *T, int ldy, in
             Q[j + i * m] = (i == j ? 1.0 : 0.0) - Q[j + i * m];
         }
     }
-    print_matrix("Q=", m, m, Q, m);
+    // print_matrix("Q=", m, m, Q, m);
     free(YT);
     free(Q);
 }
@@ -119,11 +120,8 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
             }
         }
     }
-    print_matrix("A=", m, n, A, lda);
-    //    print_matrix("V=", m, n, V, n);
-
-    // print_matrix("t= ", L, L, t, L + 1);
-    // print_matrix("v=", n, n, v, n);
+    // print_matrix("A=", m, n, A, lda);
+    // print_matrix("V=", m, n, V, n);
     // print_matrix("t=", n, n, T, ldt);
 
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, n, 1.0, V, n, T, ldt, 0.0, VT, n);
@@ -184,9 +182,9 @@ void test()
     // print_matrix("t= ", L, L, t, L + 1);
     // print_matrix("v=", n, n, v, n);
     // print_matrix("t=", n, n, t, n);
-    print_matrix("q=", m, m, q, m);
-    print_matrix("A = ", m, n, b, n);
-    print_matrix("qr=", m, n, vt, n);
+    // print_matrix("q=", m, m, q, m);
+    // print_matrix("A = ", m, n, b, n);
+    // print_matrix("qr=", m, n, vt, n);
 
     for (int i = 0; i < m; i++)
     {
@@ -210,7 +208,7 @@ void test()
 //https://www.hpc.nec/documents/sdk/SDK_NLC/UsersGuide/man/dsyr2k.html
 void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
 {
-    int L = 2;
+    int L = 500;
     int nb = L;
     assert(L % nb == 0);
     assert(MIN(N, L) >= nb && nb >= 1);
@@ -235,11 +233,18 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
         int Nk = N - L - k * L;
 
         LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, Nk, L, L, &a[k * L + lda * (k + 1) * L], lda, t, ldt);
-        // print_matrix("qr a =", N, N, a, lda);
+        for (int i = 0; i < L; i++)
+        {
+            for (int j = 0; j < i; j++)
+            {
+                t[j + i * ldt] = 0.0;
+            }
+        } // print_matrix("qr a =", N, N, a, lda);
 
         /// construct Q
         double *tmp = construct_Q(Nk, L, &a[k * L + lda * (k + 1) * L], lda, t, ldt);
-        double *tmp2 = malloc(Nk * Nk * sizeof(double));
+        //print_matrix("tmp = ", Nk, Nk, tmp, Nk);
+
         for (int i = 0; i < N; i++)
         {
             for (int j = 0; j < N; j++)
@@ -261,7 +266,6 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
         }
         // print_matrix("Q = ", N, N, Q, N);
         free(tmp);
-        free(tmp2);
         // construct Q done
 
         // update A
@@ -310,11 +314,18 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
         // print_matrix("sym a =", N, N, a, lda);
         // construct P
         cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nk, L, Nk, 1.0, &a[(k + 1) * L + lda * (k + 1) * L], lda, V, L, 0.0, update_tmp, Nk);
+        // print_matrix("before V =", Nk, L, V, L);
+        // print_matrix("before a[(k + 1) * L + lda * (k + 1) * L] =", Nk, Nk, &a[(k + 1) * L + lda * (k + 1) * L], lda);
+        // print_matrix("before update_tmp =", Nk, L, update_tmp, Nk);
+        // print_matrix("before t =", L, L, t, ldt);
+
         cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, 1.0, update_tmp, Nk, t, ldt, 0.0, update_P, L);
+        // print_matrix("before P =", Nk, L, update_P, L);
 
         // construct beta
         cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, L, L, Nk, 0.5, V, L, update_P, L, 0.0, update_tmp, Nk);
         cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, L, L, L, 1.0, t, ldt, update_tmp, Nk, 0.0, update_beta, L);
+        // print_matrix("before beta =", L, L, update_beta, L);
 
         // construct Q
         for (int i = 0; i < Nk; i++)
@@ -326,7 +337,10 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
         }
         cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, -1.0, V, L, update_beta, L, 1.0, update_Q, L);
 
-        print_matrix("before a =", N, N, a, lda);
+        // print_matrix("before a =", N, N, a, lda);
+        // print_matrix("before V =", Nk, L, V, L);
+        // print_matrix("before Q =", Nk, L, update_Q, L);
+
         // rank-2k update
         cblas_dsyr2k(CblasRowMajor, CblasUpper, CblasNoTrans, Nk, L, -1.0, V, L, update_Q, L, 1.0, &a[(k + 1) * L + lda * (k + 1) * L], lda);
 
@@ -342,7 +356,7 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
             }
         }
 
-        //print_matrix("after a =", N, N, a, lda);
+        // print_matrix("after a =", N, N, a, lda);
         free(update_P);
         free(update_beta);
         free(update_Q);
@@ -363,11 +377,11 @@ int main(void)
     //sranddev(); //srand(time(NULL));だと最初のrand()の返り値が偏る cf:https://stackoverflow.com/questions/32489058/trouble-generating-random-numbers-in-c-on-a-mac-using-xcode
     srand(random_seed);
     printf("%lf\n", (double)(rand()) / RAND_MAX);
-    // test();
+    //  test();
     //return 0;
-    size_t const m = 100;
+    size_t const m = 3000;
 
-    size_t const lda = m + 4;
+    size_t const lda = m + 1;
 
     double *const a = malloc(sizeof(double) * m * lda);
     double *const b = malloc(sizeof(double) * m * lda);

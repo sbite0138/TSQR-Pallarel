@@ -8,6 +8,7 @@
 #include <time.h>
 void print_matrix(char *msg, int m, int n, double *a, int lda)
 {
+    return;
     printf("================================\n");
     printf("%s\n", msg);
     printf("[\n");
@@ -102,10 +103,10 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
 
 void test()
 {
-    int m = 100;
-    int n = 10;
-    int lda = n + 3;
-    int ldt = n + 3;
+    int m = 5000;
+    int n = 5000;
+    int lda = n + 13;
+    int ldt = n + 31;
     double *a = gen_matrix(m, n, lda);
     double *b = malloc(sizeof(double) * m * n);
     double *v = malloc(sizeof(double) * m * n);
@@ -167,7 +168,7 @@ void test()
 
 int main(void)
 {
-    unsigned long const random_seed = 10;
+    unsigned long const random_seed = 100;
     //sranddev(); //srand(time(NULL));だと最初のrand()の返り値が偏る cf:https://stackoverflow.com/questions/32489058/trouble-generating-random-numbers-in-c-on-a-mac-using-xcode
     srand(random_seed);
     printf("%lf\n", (double)(rand()) / RAND_MAX);
