@@ -9,7 +9,6 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 void print_matrix(char *msg, int m, int n, double *a, int lda)
 {
-    return;
     printf("================================\n");
     printf("%s\n", msg);
     printf("[\n");
@@ -27,46 +26,7 @@ void print_matrix(char *msg, int m, int n, double *a, int lda)
     printf("]\n");
 }
 
-void construct_Q_from_compact_WY(int m, int n, double *Y, double *T, int ldy, int ldt)
-{
-    double *YT = calloc(m * n, sizeof(double));
-    double *Q = calloc(m * m, sizeof(double));
-
-    for (int i = 0; i < m; i++)
-    {
-        for (int j = i; j < n; j++)
-        {
-            if (i == j)
-                Y[j + i * ldy] = 1.0;
-            else
-                Y[j + i * ldy] = 0.0;
-        }
-    }
-    for (int i = 0; i < m; i++)
-    {
-        for (int j = 0; j < i; j++)
-        {
-            T[j + i * ldt] = 0.0;
-        }
-    }
-    // print_matrix("Y=", m, n, Y, ldy);
-    // print_matrix("T=", n, n, T, ldt);
-
-    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, n, 1.0, Y, ldy, T, ldt, 0.0, YT, n);
-    // print_matrix("YT=", m, n, YT, n);
-    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, m, m, n, 1.0, YT, n, Y, ldy, 0.0, Q, m);
-    for (int i = 0; i < m; i++)
-    {
-        for (int j = 0; j < m; j++)
-        {
-            Q[j + i * m] = (i == j ? 1.0 : 0.0) - Q[j + i * m];
-        }
-    }
-    // print_matrix("Q=", m, m, Q, m);
-    free(YT);
-    free(Q);
-}
-
+// (m,n)次元、leading dimensionがldaの行列aのFrobenius normを計算して返す
 double calc_Frobenius_norm(int m, int n, double *a, int lda)
 {
     double norm = 0.0;
@@ -79,6 +39,8 @@ double calc_Frobenius_norm(int m, int n, double *a, int lda)
     }
     return sqrt(norm);
 }
+
+// (m,n)次元、leading dimensionがldaの行列aを作成し、要素をランダムに設定し、aの先頭アドレスを返す
 double *gen_matrix(int m, int n, int lda)
 {
     assert(lda >= n);
@@ -90,19 +52,21 @@ double *gen_matrix(int m, int n, int lda)
         for (size_t j = 0; j < n; ++j)
         {
             a[j + lda * i] = 10.0 - 20.0 * (double)(rand()) / RAND_MAX;
-            // printf("%ld %ld\n", i, j);
         }
     }
     return a;
 }
 
+// LAPACKE_dgeqrtを行った後のA,TからQを陽に構築して、Qの先頭アドレスを返す。A,Tの内容は変更しない。
+// cf. http://www.netlib.org/lapack/explore-html/dd/d9a/group__double_g_ecomputational_gaddcf152e87deec6123a1899f6f51101e.html
 double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
 {
     printf("in construct Q\n");
+    // Q = I - VTV^t と表すことができ、Aの下三角部分からVが構築できる
     double *V = malloc(sizeof(double) * m * n);
     double *VT = malloc(sizeof(double) * m * n);
     double *Q = malloc(sizeof(double) * m * m);
-
+    // AからVを構築する。
     for (int i = 0; i < m; i++)
     {
         for (int j = 0; j < n; j++)
@@ -120,18 +84,16 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
             }
         }
     }
-    // print_matrix("A=", m, n, A, lda);
-    // print_matrix("V=", m, n, V, n);
-    // print_matrix("t=", n, n, T, ldt);
-
+    // VT = V * Tを計算
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, n, 1.0, V, n, T, ldt, 0.0, VT, n);
 
-    // print_matrix("VT =", m, n, VT, n);
+    // Q =I - VT * V^t を計算する
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, m, m, n, -1.0, VT, n, V, n, 0.0, Q, m);
     for (int i = 0; i < m; i++)
     {
         Q[i + m * i] += 1.0;
     }
+
     free(V);
     free(VT);
     printf("out construct Q\n");
@@ -139,83 +101,20 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
     return Q;
 }
 
-void test()
+// (N,N)次元の実対称行列A(leading dimensionはlda)を帯行列化し、変換後の帯行列BとB=QAQ^tなるQを求める。関数終了時にAの要素はBの要素で上書きされる
+void bischof(int matrix_layout, int N, double *A, int lda, double *Q)
 {
-    int m = 100;
-    int n = 5;
-    int lda = n + 1;
-    int ldt = n + 3;
-    double *a = gen_matrix(m, n, lda);
-    double *b = malloc(sizeof(double) * m * n);
-    double *v = malloc(sizeof(double) * m * n);
-    double *vt = malloc(sizeof(double) * m * n);
-
-    double *q; //= malloc(sizeof(double) * n * n);
-    double norm_a = calc_Frobenius_norm(m, n, a, lda);
-    for (int i = 0; i < m; i++)
-    {
-        for (int j = 0; j < n; j++)
-        {
-            b[j + n * i] = a[j + lda * i];
-            v[j + n * i] = 0.0;
-        }
-    }
-
-    // print_matrix("A = ", n, n, a, n);
-
-    double *const t = calloc(ldt * n, sizeof(double));
-    LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, m, n, n, a, lda, t, ldt);
-    q = construct_Q(m, n, a, lda, t, ldt);
-    for (int i = 0; i < m; i++)
-    {
-        for (int j = 0; j < n; j++)
-        {
-            if (i > j)
-            {
-
-                a[j + lda * i] = 0;
-            }
-        }
-    }
-    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, m, 1.0, q, m, a, lda, 0.0, vt, n);
-
-    // print_matrix("t= ", L, L, t, L + 1);
-    // print_matrix("v=", n, n, v, n);
-    // print_matrix("t=", n, n, t, n);
-    // print_matrix("q=", m, m, q, m);
-    // print_matrix("A = ", m, n, b, n);
-    // print_matrix("qr=", m, n, vt, n);
-
-    for (int i = 0; i < m; i++)
-    {
-        for (int j = 0; j < n; j++)
-        {
-            b[j + n * i] -= vt[j + n * i];
-        }
-    }
-    double norm_qr = calc_Frobenius_norm(m, n, b, n);
-    printf("error = %e\n", norm_qr / norm_a);
-    free(t);
-    free(a);
-    free(b);
-    free(q);
-    free(v);
-    free(vt);
-}
-
-// QR分解はLAPACKを使って大丈夫
-
-//https://www.hpc.nec/documents/sdk/SDK_NLC/UsersGuide/man/dsyr2k.html
-void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
-{
-    int L = 500;
+    int L = 500; //帯行列化時の幅
     int nb = L;
-    assert(L % nb == 0);
-    assert(MIN(N, L) >= nb && nb >= 1);
     int ldt = L;
+    assert(MIN(N, L) >= nb && nb >= 1);
     assert(ldt >= nb);
+    assert(N % L == 0);
+    // Qの計算に用いる領域
     double *Qnext = malloc(N * N * sizeof(double));
+
     double *Qtmp = malloc(N * N * sizeof(double));
+    // Qを単位行列で初期化する
     for (int i = 0; i < N; i++)
     {
         for (int j = 0; j < N; j++)
@@ -224,15 +123,13 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
         }
     }
 
-    assert(N % L == 0);
     for (int k = 0; k < N / L - 1; k++)
-    //for (int k = 0; k < 1; k++)
     {
 
         double *const t = calloc(ldt * nb, sizeof(double));
         int Nk = N - L - k * L;
-
-        LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, Nk, L, L, &a[k * L + lda * (k + 1) * L], lda, t, ldt);
+        LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, Nk, L, L, &A[k * L + lda * (k + 1) * L], lda, t, ldt);
+        print_matrix("t = ", nb, nb, t, ldt);
         for (int i = 0; i < L; i++)
         {
             for (int j = 0; j < i; j++)
@@ -242,7 +139,7 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
         } // print_matrix("qr a =", N, N, a, lda);
 
         /// construct Q
-        double *tmp = construct_Q(Nk, L, &a[k * L + lda * (k + 1) * L], lda, t, ldt);
+        double *tmp = construct_Q(Nk, L, &A[k * L + lda * (k + 1) * L], lda, t, ldt);
         //print_matrix("tmp = ", Nk, Nk, tmp, Nk);
 
         for (int i = 0; i < N; i++)
@@ -275,7 +172,7 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
         double *update_beta = malloc(L * L * sizeof(double));
         double *update_Q = malloc(Nk * L * sizeof(double));
 
-        double *a_part = &a[k * L + lda * (k + 1) * L];
+        double *a_part = &A[k * L + lda * (k + 1) * L];
         for (int i = 0; i < Nk; i++)
         {
             for (int j = 0; j < L; j++)
@@ -302,18 +199,18 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
             {
                 if (i > j + L)
                 {
-                    a[j + i * lda] = a[i + j * lda] = 0.0;
+                    A[j + i * lda] = A[i + j * lda] = 0.0;
                 }
                 else
                 {
-                    a[i + j * lda] = a[j + i * lda];
+                    A[i + j * lda] = A[j + i * lda];
                 }
             }
         }
 
         // print_matrix("sym a =", N, N, a, lda);
         // construct P
-        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nk, L, Nk, 1.0, &a[(k + 1) * L + lda * (k + 1) * L], lda, V, L, 0.0, update_tmp, Nk);
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nk, L, Nk, 1.0, &A[(k + 1) * L + lda * (k + 1) * L], lda, V, L, 0.0, update_tmp, Nk);
         // print_matrix("before V =", Nk, L, V, L);
         // print_matrix("before a[(k + 1) * L + lda * (k + 1) * L] =", Nk, Nk, &a[(k + 1) * L + lda * (k + 1) * L], lda);
         // print_matrix("before update_tmp =", Nk, L, update_tmp, Nk);
@@ -342,7 +239,7 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
         // print_matrix("before Q =", Nk, L, update_Q, L);
 
         // rank-2k update
-        cblas_dsyr2k(CblasRowMajor, CblasUpper, CblasNoTrans, Nk, L, -1.0, V, L, update_Q, L, 1.0, &a[(k + 1) * L + lda * (k + 1) * L], lda);
+        cblas_dsyr2k(CblasRowMajor, CblasUpper, CblasNoTrans, Nk, L, -1.0, V, L, update_Q, L, 1.0, &A[(k + 1) * L + lda * (k + 1) * L], lda);
 
         // DGEMM update
         // cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, Nk, Nk, Nk, 1.0, tmp, Nk, &a[(k + 1) * L + lda * (k + 1) * L], lda, 0.0, tmp2, Nk);
@@ -352,7 +249,7 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
         {
             for (int j = i; j < N; j++)
             {
-                a[i + j * lda] = a[j + i * lda];
+                A[i + j * lda] = A[j + i * lda];
             }
         }
 
@@ -373,9 +270,9 @@ void bischof(int matrix_layout, int N, double *a, int lda, double *Q)
 
 int main(void)
 {
-    unsigned long const random_seed = 10;
-    //sranddev(); //srand(time(NULL));だと最初のrand()の返り値が偏る cf:https://stackoverflow.com/questions/32489058/trouble-generating-random-numbers-in-c-on-a-mac-using-xcode
-    srand(random_seed);
+    unsigned long const random_seed = 100;
+    sranddev(); //srand(time(NULL));だと最初のrand()の返り値が偏る cf:https://stackoverflow.com/questions/32489058/trouble-generating-random-numbers-in-c-on-a-mac-using-xcode
+    //srand(random_seed);
     printf("%lf\n", (double)(rand()) / RAND_MAX);
     //  test();
     //return 0;
@@ -405,23 +302,23 @@ int main(void)
     }
     double *Q = malloc(m * m * sizeof(double));
 
-    print_matrix("A= ", m, m, a, lda);
+    // print_matrix("A= ", m, m, a, lda);
     double norm_a = calc_Frobenius_norm(m, m, a, lda);
     double const t1 = omp_get_wtime();
     /* ----------------- START ----------------- */
     bischof(LAPACK_ROW_MAJOR, m, a, lda, Q);
     /* ----------------- END ----------------- */
     double const t2 = omp_get_wtime();
-    print_matrix("res=", m, m, a, lda);
-    print_matrix("Q=", m, m, Q, m);
+    //print_matrix("res=", m, m, a, lda);
+    //print_matrix("Q=", m, m, Q, m);
     cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, Q, m, 0.0, tmp, lda);
-    print_matrix("QQ^T =", m, m, tmp, lda);
+    // print_matrix("QQ^T =", m, m, tmp, lda);
     printf("norm of QQ^T = %e\n", calc_Frobenius_norm(m, m, tmp, lda) / sqrt(m));
     // cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, b, lda, 0.0, a, lda);
     // cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, m, m, 1.0, a, lda, Q, m, 0.0, b, lda);
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, m, m, 1.0, Q, m, a, lda, 0.0, tmp, lda);
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, m, m, m, 1.0, tmp, lda, Q, m, 0.0, a, lda);
-    print_matrix("a =", m, m, a, lda);
+    //print_matrix("a =", m, m, a, lda);
     for (size_t i = 0; i < m; ++i)
     {
         for (size_t j = 0; j < m; ++j)
@@ -430,7 +327,7 @@ int main(void)
         }
     }
 
-    print_matrix("b =", m, m, b, lda);
+    // print_matrix("b =", m, m, b, lda);
 
     printf("norm  = %e\n", calc_Frobenius_norm(m, m, b, lda) / norm_a);
     //    print_matrix("t=", n, n, t, ldt);

@@ -104,9 +104,9 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
 void test()
 {
     int m = 5000;
-    int n = 5000;
-    int lda = n + 13;
-    int ldt = n + 31;
+    int n = 100;
+    int lda = n;
+    int ldt = n + 101010;
     double *a = gen_matrix(m, n, lda);
     double *b = malloc(sizeof(double) * m * n);
     double *v = malloc(sizeof(double) * m * n);
@@ -125,7 +125,7 @@ void test()
 
     // print_matrix("A = ", n, n, a, n);
 
-    double *t = malloc((ldt + 1) * n * sizeof(double));
+    double *t = malloc(ldt * n * sizeof(double));
     printf("%p\n", t);
     LAPACKE_dgeqrt(LAPACK_ROW_MAJOR, m, n, n, a, lda, t, ldt);
     q = construct_Q(m, n, a, lda, t, ldt);
