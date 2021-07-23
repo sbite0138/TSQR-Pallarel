@@ -86,16 +86,13 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
     return Q;
 }
 
-// (N,N)次元の実対称行列A(leading dimensionはlda)を帯行列化し、変換後の帯行列BとB=QAQ^tなるQを求める。関数終了時にAの要素はBの要素で上書きされる
-void bischof(int matrix_layout, int N, double *A, int lda, double *Q)
+// Aを半帯幅がLのN*N帯行列BとTによって構築し，その精度を調べる
+void check(int N, int L, double *A, int lda, double *B, int ldb, double *T, int ldt)
 {
-    int L = 50; //帯行列化時の幅
-    int nb = L;
-    int ldt = nb;
-    assert(MIN(N, L) >= nb && nb >= 1);
-    assert(ldt >= nb);
-    assert(N % L == 0);
-    // Qの計算に用いる領域
+    // Qを構築する
+    // C = QBQ^T = A（となるはず）
+    double *C = malloc(N * N * sizeof(double));
+    double *Q = malloc(N * N * sizeof(double));
     double *Qnext = malloc(N * N * sizeof(double));
     double *Qtmp = malloc(N * N * sizeof(double));
 
@@ -107,25 +104,13 @@ void bischof(int matrix_layout, int N, double *A, int lda, double *Q)
             Q[i + j * N] = (i == j ? 1.0 : 0.0);
         }
     }
-
-    for (int k = 0; k < N / L - 1; k++)
+    printf("N=%d\n", N);
+    print_matrix("Q = ", Q, N, N, N);
+    //    for (int k = 0; k < N / L - 1; k++)
+    for (int k = 0; k < 0; k++)
     {
-        printf("iteration %d/%d\n", k + 1, N / L - 1);
-        double *const t = calloc(ldt * L, sizeof(double));
         int Nk = N - L - k * L;
-        // Aの(k+1,k)ブロック以下をQR分解する
-        LAPACKE_dgeqrt(LAPACK_COL_MAJOR, Nk, L, L, &A[(k + 1) * L + lda * k * L], lda, t, ldt);
-        // tの下三角部分を0クリア
-        for (int i = 0; i < L; i++)
-        {
-            for (int j = 0; j < i; j++)
-            {
-                t[i + j * ldt] = 0.0;
-            }
-        }
-
-        // Qを構築する
-        double *tmp = construct_Q(Nk, L, &A[(k + 1) * L + lda * k * L], lda, t, ldt);
+        double *tmp = construct_Q(Nk, L, &B[(k + 1) * L + lda * k * L], lda, &T[k * L], ldt);
         // double *tmp2 = malloc(Nk * Nk * sizeof(double));
         // print_matrix("construct Q = ", Nk, Nk, tmp, Nk);
         // cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, Nk, Nk, Nk, 1.0, tmp, Nk, tmp, Nk, 0.0, tmp2, Nk);
@@ -155,6 +140,41 @@ void bischof(int matrix_layout, int N, double *A, int lda, double *Q)
             }
         }
         free(tmp);
+    }
+
+    free(Qnext);
+    free(Qtmp);
+    free(C);
+    free(Q);
+}
+
+// (N,N)次元の実対称行列A(leading dimensionはlda)を帯行列化し、変換後の帯行列BとB=QAQ^tなるQを求める。関数終了時にAの要素はBの要素で上書きされる
+void bischof(int N, int L, double *A, int lda, double *T, int ldt)
+{
+    int nb = L;
+    int ldt_iter = nb;
+    assert(MIN(N, L) >= nb && nb >= 1);
+    assert(ldt_iter >= nb);
+    assert(N % L == 0);
+    double *const T_iter = calloc(ldt_iter * L, sizeof(double));
+
+    for (int k = 0; k < N / L - 1; k++)
+    {
+        printf("iteration %d/%d\n", k + 1, N / L - 1);
+        int Nk = N - L - k * L;
+        // Aの(k+1,k)ブロック以下をQR分解する
+        LAPACKE_dgeqrt(LAPACK_COL_MAJOR, Nk, L, L, &A[(k + 1) * L + lda * k * L], lda, T_iter, ldt_iter);
+        // TにT_iterを代入
+        for (int i = 0; i < L; i++)
+        {
+            for (int j = 0; j < i; j++)
+            {
+                if (j >= i)
+                    T[i + (j + L * k) * ldt] = T_iter[i + j * ldt_iter];
+                else
+                    T[i + (j + L * k) * ldt] = 0.0;
+            }
+        }
 
         // Aを更新する
         double *V = malloc(Nk * L * sizeof(double));
@@ -193,7 +213,7 @@ void bischof(int matrix_layout, int N, double *A, int lda, double *Q)
             {
                 if (i > j + L)
                 {
-                    A[i + j * lda] = A[j + i * lda] = 0.0;
+                    //A[i + j * lda] = A[j + i * lda] = 0.0;
                 }
                 else
                 {
@@ -203,11 +223,11 @@ void bischof(int matrix_layout, int N, double *A, int lda, double *Q)
         }
         // 山本有作先生の『キャッシュマシン向け三重対角化アルゴリズムの性能予測方式』で説明されているBischofのアルゴリズム中のPを構築する
         cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, L, Nk, 1.0, &A[(k + 1) * L + lda * (k + 1) * L], lda, V, Nk, 0.0, update_tmp, Nk);
-        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, 1.0, update_tmp, Nk, t, ldt, 0.0, update_P, Nk);
+        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, 1.0, update_tmp, Nk, T_iter, ldt_iter, 0.0, update_P, Nk);
 
         // betaを構築する
         cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, Nk, 0.5, V, Nk, update_P, Nk, 0.0, update_tmp, Nk);
-        cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, L, 1.0, t, ldt, update_tmp, Nk, 0.0, update_beta, L);
+        cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, L, 1.0, T_iter, ldt_iter, update_tmp, Nk, 0.0, update_beta, L);
 
         // Qを構築する
         for (int i = 0; i < Nk; i++)
@@ -235,10 +255,8 @@ void bischof(int matrix_layout, int N, double *A, int lda, double *Q)
         free(update_Q);
         free(update_tmp);
         free(V);
-        free(t);
     }
-    free(Qtmp);
-    free(Qnext);
+    free(T_iter);
 }
 
 int main(void)
@@ -248,10 +266,12 @@ int main(void)
 
     size_t const m = 1000; // 帯行列化する行列のサイズ
     size_t const lda = m + 1;
+    int L = 50; //帯行列化時の幅
 
-    double *const a = malloc(sizeof(double) * m * lda);   // 帯行列化する行列
-    double *const b = malloc(sizeof(double) * m * lda);   // aのコピーを格納する行列
-    double *Q = malloc(m * m * sizeof(double));           // Bischofのアルゴリズムで計算されるQを格納する行列
+    double *const a = malloc(sizeof(double) * m * lda); // 帯行列化する行列
+    double *const b = malloc(sizeof(double) * m * lda); // aのコピーを格納する行列
+    // double *Q = malloc(m * m * sizeof(double));           // Bischofのアルゴリズムで計算されるQを格納する行列
+    double *T = malloc(L * m * sizeof(double));           // Bischofのアルゴリズムで計算されるQを格納する行列
     double *const tmp = malloc(sizeof(double) * m * lda); //計算に使う一時的な行列
 
     // aの値を0~1の乱数で初期化する
@@ -277,33 +297,35 @@ int main(void)
     double norm_a = calc_Frobenius_norm(m, m, a, lda);
 
     //Bischofのアルゴリズム実行
-    bischof(LAPACK_COL_MAJOR, m, a, lda, Q);
-
+    // bischof(m, L, a, lda, T, L);
+    // bはaのコピーなので，この順番が正しい
+    check(m, L, b, lda, a, lda, T, L);
     //Qが直交行列かQQ^Tを計算することで確かめる
-    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, m, m, m, 1.0, Q, m, Q, m, 0.0, tmp, lda);
+    // cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, m, m, m, 1.0, Q, m, Q, m, 0.0, tmp, lda);
 
-    //直交行列ならこの値が1になっているはず
-    printf("norm of QQ^T = %e\n", calc_Frobenius_norm(m, m, tmp, lda) / sqrt(m));
+    // //直交行列ならこの値が1になっているはず
+    // printf("norm of QQ^T = %e\n", calc_Frobenius_norm(m, m, tmp, lda) / sqrt(m));
 
-    //QaQ^Tを計算することで，帯行列化したaから元の行列aを復元する
-    cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, a, lda, 0.0, tmp, lda);
-    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, m, m, m, 1.0, tmp, lda, Q, m, 0.0, a, lda);
+    // //QaQ^Tを計算することで，帯行列化したaから元の行列aを復元する
+    // cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, a, lda, 0.0, tmp, lda);
+    // cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, m, m, m, 1.0, tmp, lda, Q, m, 0.0, a, lda);
 
-    // 復元したaと元のaとの誤差を計算する
-    for (size_t i = 0; i < m; ++i)
-    {
-        for (size_t j = 0; j < m; ++j)
-        {
-            b[i + lda * j] -= a[i + j * lda];
-        }
-    }
-    printf("norm  = %e\n", calc_Frobenius_norm(m, m, b, lda) / norm_a);
+    // // 復元したaと元のaとの誤差を計算する
+    // for (size_t i = 0; i < m; ++i)
+    // {
+    //     for (size_t j = 0; j < m; ++j)
+    //     {
+    //         b[i + lda * j] -= a[i + j * lda];
+    //     }
+    // }
+    // printf("norm  = %e\n", calc_Frobenius_norm(m, m, b, lda) / norm_a);
 
     printf("END\n");
 
     free(a);
     free(b);
     free(tmp);
-    free(Q);
+    free(T);
+
     return EXIT_SUCCESS;
 }
