@@ -11,6 +11,7 @@
 // (m,n)次元でleading dimensionがldaの行列aの要素を，msgで指定された文字列の後に出力する．（デバッグ用）
 void print_matrix(char *msg, int m, int n, double *a, int lda)
 {
+    return;
     printf("================================\n");
     printf("%s\n", msg);
     printf("[\n");
@@ -51,6 +52,8 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
     double *V = malloc(sizeof(double) * m * n);
     double *VT = malloc(sizeof(double) * m * n);
     double *Q = malloc(sizeof(double) * m * m);
+    print_matrix("(costruct) A = ", m, n, A, lda);
+
     // AからVを構築する。
     for (int i = 0; i < m; i++)
     {
@@ -69,8 +72,12 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
             }
         }
     }
+    print_matrix("(costruct) V = ", m, n, V, m);
+    print_matrix("(costruct) T = ", n, n, T, ldt);
+
     // VT = V * Tを計算
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, m, n, n, 1.0, V, m, T, ldt, 0.0, VT, m);
+    print_matrix("(costruct) VT = ", m, n, VT, m);
 
     // Q =I - VT * V^t を計算する
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, m, m, n, -1.0, VT, m, V, m, 0.0, Q, m);
@@ -78,6 +85,7 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
     {
         Q[i + m * i] += 1.0;
     }
+    print_matrix("(costruct) Q = ", m, m, Q, m);
 
     free(V);
     free(VT);
@@ -89,9 +97,12 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
 // Aを半帯幅がLのN*N帯行列BとTによって構築し，その精度を調べる
 void check(int N, int L, double *A, int lda, double *B, int ldb, double *T, int ldt)
 {
+
+    print_matrix("T = ", L, N, T, ldt);
+    print_matrix("B = ", N, N, B, ldb);
+
     // Qを構築する
-    // C = QBQ^T = A（となるはず）
-    double *C = malloc(N * N * sizeof(double));
+    double *tmp = malloc(N * N * sizeof(double));
     double *Q = malloc(N * N * sizeof(double));
     double *Qnext = malloc(N * N * sizeof(double));
     double *Qtmp = malloc(N * N * sizeof(double));
@@ -104,15 +115,12 @@ void check(int N, int L, double *A, int lda, double *B, int ldb, double *T, int 
             Q[i + j * N] = (i == j ? 1.0 : 0.0);
         }
     }
-    printf("N=%d\n", N);
-    print_matrix("Q = ", Q, N, N, N);
-    //    for (int k = 0; k < N / L - 1; k++)
-    for (int k = 0; k < 0; k++)
+    for (int k = 0; k < N / L - 1; k++)
     {
         int Nk = N - L - k * L;
-        double *tmp = construct_Q(Nk, L, &B[(k + 1) * L + lda * k * L], lda, &T[k * L], ldt);
+        double *tmp = construct_Q(Nk, L, &B[(k + 1) * L + lda * k * L], lda, &T[k * ldt * L], ldt);
         // double *tmp2 = malloc(Nk * Nk * sizeof(double));
-        // print_matrix("construct Q = ", Nk, Nk, tmp, Nk);
+        print_matrix("construct Q = ", Nk, Nk, tmp, Nk);
         // cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, Nk, Nk, Nk, 1.0, tmp, Nk, tmp, Nk, 0.0, tmp2, Nk);
         // print_matrix("QQ^T = ", Nk, Nk, tmp2, Nk);
         // free(tmp2);
@@ -130,6 +138,19 @@ void check(int N, int L, double *A, int lda, double *B, int ldb, double *T, int 
             }
         }
 
+        print_matrix("tmp = ", N, N, Qnext, N);
+
+        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, N, N, N, 1.0, Qnext, N, Qnext, N, 0.0, Qtmp, N);
+
+        print_matrix("QQ^T = ", N, N, Qtmp, N);
+
+        for (int i = 0; i < N; i++)
+        {
+            Qtmp[i + i * N] -= 1.0;
+        }
+        //直交行列ならこの値が0になっているはず
+        printf("norm of QQ^T - I = %e\n", calc_Frobenius_norm(N, N, Qtmp, N) / sqrt(N));
+
         // QをQ*Qnextで更新する
         cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, N, N, N, 1.0, Qnext, N, Q, N, 0.0, Qtmp, N);
         for (int i = 0; i < N; i++)
@@ -141,10 +162,42 @@ void check(int N, int L, double *A, int lda, double *B, int ldb, double *T, int 
         }
         free(tmp);
     }
+    printf("N=%d\n", N);
+    print_matrix("Q = ", N, N, Q, N);
+    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, N, N, N, 1.0, Q, N, Q, N, 0.0, Qtmp, N);
+    for (int i = 0; i < N; i++)
+    {
+        Qtmp[i + i * N] -= 1.0;
+    }
+    //直交行列ならこの値が0になっているはず
+    printf("norm of QQ^T - I = %e\n", calc_Frobenius_norm(N, N, Qtmp, N) / sqrt(N));
+    for (int i = 0; i < N; i++)
+    {
+        for (int j = 0; j < N; j++)
+        {
+            if (abs(i - j) > L)
+            {
+                B[j + i * ldb] = 0.0;
+            }
+        }
+    }
+    //QBQ^Tを計算することで，帯行列化したBから元の行列Aを復元する
+    cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, N, N, N, 1.0, Q, N, B, ldb, 0.0, tmp, N);
+    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, N, N, N, 1.0, tmp, N, Q, N, 0.0, B, ldb);
+
+    // 復元したaと元のaとの誤差を計算する
+    for (size_t i = 0; i < N; ++i)
+    {
+        for (size_t j = 0; j < N; ++j)
+        {
+            B[i + lda * j] -= A[i + j * lda];
+        }
+    }
+    printf("norm  = %e\n", calc_Frobenius_norm(N, N, B, ldb) / calc_Frobenius_norm(N, N, A, lda));
 
     free(Qnext);
     free(Qtmp);
-    free(C);
+    free(tmp);
     free(Q);
 }
 
@@ -164,17 +217,21 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt)
         int Nk = N - L - k * L;
         // Aの(k+1,k)ブロック以下をQR分解する
         LAPACKE_dgeqrt(LAPACK_COL_MAJOR, Nk, L, L, &A[(k + 1) * L + lda * k * L], lda, T_iter, ldt_iter);
+        // print_matrix("T iter = ", L, L, T_iter, ldt_iter);
         // TにT_iterを代入
+        print_matrix("T iter = ", L, L, T_iter, ldt_iter);
+
         for (int i = 0; i < L; i++)
         {
-            for (int j = 0; j < i; j++)
+            for (int j = 0; j < L; j++)
             {
                 if (j >= i)
                     T[i + (j + L * k) * ldt] = T_iter[i + j * ldt_iter];
                 else
-                    T[i + (j + L * k) * ldt] = 0.0;
+                    T[i + (j + L * k) * ldt] = T_iter[i + j * ldt_iter] = 0.0;
             }
         }
+        print_matrix("T = ", L, N, T, ldt);
 
         // Aを更新する
         double *V = malloc(Nk * L * sizeof(double));
@@ -185,6 +242,7 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt)
 
         // Aの(k+1,k)ブロックの先頭アドレス
         double *a_part = &A[(k + 1) * L + lda * k * L];
+        print_matrix("A part = ", Nk, L, a_part, lda);
 
         // Vにa_partの下三角部分を代入する(LAPACKE_dgeqrtを実行しているので，a_partの下三角部分にはQのcompact-WY表現の一部が入っている)
         for (int i = 0; i < Nk; i++)
@@ -211,14 +269,7 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt)
         {
             for (int j = L * k; j < L * (k + 1); j++)
             {
-                if (i > j + L)
-                {
-                    //A[i + j * lda] = A[j + i * lda] = 0.0;
-                }
-                else
-                {
-                    A[j + i * lda] = A[i + j * lda];
-                }
+                A[j + i * lda] = A[i + j * lda];
             }
         }
         // 山本有作先生の『キャッシュマシン向け三重対角化アルゴリズムの性能予測方式』で説明されているBischofのアルゴリズム中のPを構築する
@@ -266,12 +317,12 @@ int main(void)
 
     size_t const m = 1000; // 帯行列化する行列のサイズ
     size_t const lda = m + 1;
-    int L = 50; //帯行列化時の幅
+    int L = 10; //帯行列化時の幅
 
     double *const a = malloc(sizeof(double) * m * lda); // 帯行列化する行列
     double *const b = malloc(sizeof(double) * m * lda); // aのコピーを格納する行列
     // double *Q = malloc(m * m * sizeof(double));           // Bischofのアルゴリズムで計算されるQを格納する行列
-    double *T = malloc(L * m * sizeof(double));           // Bischofのアルゴリズムで計算されるQを格納する行列
+    double *T = calloc(L * m, sizeof(double));            // Bischofのアルゴリズムで計算されるQを格納する行列
     double *const tmp = malloc(sizeof(double) * m * lda); //計算に使う一時的な行列
 
     // aの値を0~1の乱数で初期化する
@@ -294,12 +345,17 @@ int main(void)
 
     // print_matrix("A= ", m, m, a, lda);
     // aのノルムを計算しておく
-    double norm_a = calc_Frobenius_norm(m, m, a, lda);
-
+    //    double norm_a = calc_Frobenius_norm(m, m, a, lda);
     //Bischofのアルゴリズム実行
-    // bischof(m, L, a, lda, T, L);
+    bischof(m, L, a, lda, T, L);
+    print_matrix("A = ", m, m, b, lda);
+
+    print_matrix("B = ", m, m, a, lda);
+
     // bはaのコピーなので，この順番が正しい
+
     check(m, L, b, lda, a, lda, T, L);
+
     //Qが直交行列かQQ^Tを計算することで確かめる
     // cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, m, m, m, 1.0, Q, m, Q, m, 0.0, tmp, lda);
 
