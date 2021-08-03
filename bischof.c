@@ -201,6 +201,163 @@ void check(int N, int L, double *A, int lda, double *B, int ldb, double *T, int 
     free(Q);
 }
 
+int tsqr(int matrix_layout, int m, int n, double *a, int lda, double *t, int ldt)
+{
+    //    if (m <= n)
+    if (1 <= 1)
+    {
+        LAPACKE_dgeqrt(matrix_layout, m, n, n, a, lda, t, ldt);
+        return 0;
+    }
+    int m_top = m / 2;
+    int m_bottom = m - m_top;
+
+    double *t_top = calloc(n * ldt, sizeof(double));
+    double *t_bottom = calloc(n * ldt, sizeof(double));
+    double *a_org = calloc(n * lda, sizeof(double));
+    LAPACKE_dlacpy(matrix_layout, 'A', m, n, a, lda, a_org, lda);
+
+    double *a_top = a;
+    double *a_bottom = &a[m_top];
+    // print_matrix(m_top, n, a_top, lda);
+    // print_matrix(m_bottom, n, a_bottom, lda);
+
+    LAPACKE_dgeqrt(matrix_layout, m_bottom, n, n, a_bottom, lda, t_bottom, ldt);
+    LAPACKE_dgeqrt(matrix_layout, m_top, n, n, a_top, lda, t_top, ldt);
+    print_matrix("a=", m, n, a, lda);
+
+    // TODO: forの範囲を変えて高速化
+    for (int i = 0; i < m_top; i++)
+    {
+        for (int j = 0; j < n; j++)
+        {
+            if (i > j)
+            {
+                a_top[i + j * lda] = 0.0;
+            }
+        }
+    }
+
+    // TODO: forの範囲を変えて高速化
+    for (int i = 0; i < m_bottom; i++)
+    {
+        for (int j = 0; j < n; j++)
+        {
+            if (i > j)
+            {
+                a_bottom[i + j * lda] = 0.0;
+            }
+        }
+    }
+    // (R1;R2) -> Q'R
+    LAPACKE_dgeqrt(matrix_layout, m, n, n, a, lda, t, ldt);
+    // a_org=a_org-R
+    for (int i = 0; i < m; i++)
+    {
+        for (int j = 0; j < n; j++)
+        {
+            if (i <= j)
+            {
+                a_org[i + j * lda] -= a[i + j * lda];
+            }
+        }
+    }
+    // aは上三角行列の形になっている
+    double *R = a;
+    // t = R_1()
+    // TODO: LAPACKEのルーチンを使ってできないか考える
+    for (int i = 0; i < n; i++)
+    {
+        for (int j = i; j < n; j++)
+        {
+            t[i + j * ldt] = R[i + j * lda];
+        }
+    }
+
+    // a_org=LU
+    int *ipiv = calloc(n, sizeof(int));
+    assert(LAPACKE_dgetrf(matrix_layout, m, n, a_org, lda, ipiv) == 0);
+
+    for (int i = 0; i < n; i++)
+    {
+        // TODO:行列の置換が起きているときも動作するようにする
+        assert(ipiv[i] == i + 1);
+    }
+    print_matrix("a_org= ", m, n, a_org, lda);
+    // print_matrix(n, n, t, ldt);
+    // t = t^-1 = R_1^-1
+
+    LAPACKE_dtrtri(matrix_layout, 'U', 'N', n, t, ldt);
+
+    print_matrix("Line 107", n, n, t, ldt);
+    double *U = calloc(n * ldt, sizeof(double));
+
+    // TODO: LAPACKEのルーチンを使ってできないか考える
+    for (int i = 0; i < n; i++)
+    {
+        for (int j = i; j < n; j++)
+        {
+            U[i + j * ldt] = a_org[i + j * lda];
+        }
+    }
+    // LAPACKE_dlacpy(matrix_layout, 'U', n, n, a_org, lda, U, ldt);
+
+    double *Yinv = calloc(n * ldt, sizeof(double));
+    // Yinv = L
+    print_matrix("Yinv 0", n, n, Yinv, ldt);
+
+    // Yinv = a_orgの下三角部分
+    // TODO: LAPACKEのルーチンを使ってできないか考える
+    for (int i = 0; i < n; i++)
+    {
+        for (int j = 0; j <= i; j++)
+        {
+            Yinv[i + j * ldt] = a_org[i + j * lda];
+        }
+    }
+    print_matrix("Yinv 1", n, n, Yinv, ldt);
+
+    for (int i = 0; i < n; i++)
+    {
+        Yinv[i + i * ldt] = 1.0;
+    }
+    print_matrix("Yinv 2", n, n, Yinv, ldt);
+
+    // Yinv = Yinv^-1 = L^-1
+    LAPACKE_dtrtri(matrix_layout, 'L', 'U', n, Yinv, ldt);
+    print_matrix("Yinv 3", n, n, Yinv, ldt);
+
+    // t2 =  R_1^-1 * Yinv^T
+    double *t2 = calloc(n * ldt, sizeof(double));
+
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, n, n, n, 1.0, t, ldt, Yinv, ldt, 0.0, t2, ldt);
+    print_matrix("Line 123", n, n, t2, ldt);
+
+    // t = -Ut2
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, n, n, n, -1.0, U, ldt, t2, ldt, 0.0, t, ldt);
+    print_matrix("Line 127", n, n, t, ldt);
+
+    for (int i = 0; i < m; i++)
+    {
+        for (int j = 0; j < n; j++)
+        {
+            if (i > j)
+            {
+                a[i + j * lda] = a_org[i + j * lda];
+            }
+        }
+    }
+    free(U);
+    free(t2);
+    free(Yinv);
+    free(ipiv);
+    free(t_top);
+    free(t_bottom);
+    free(a_org);
+
+    return 0;
+}
+
 // (N,N)次元の実対称行列A(leading dimensionはlda)を帯行列化し、変換後の帯行列BとB=QAQ^tなるQを求める。関数終了時にAの要素はBの要素で上書きされる
 void bischof(int N, int L, double *A, int lda, double *T, int ldt)
 {
@@ -216,7 +373,8 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt)
         printf("iteration %d/%d\n", k + 1, N / L - 1);
         int Nk = N - L - k * L;
         // Aの(k+1,k)ブロック以下をQR分解する
-        LAPACKE_dgeqrt(LAPACK_COL_MAJOR, Nk, L, L, &A[(k + 1) * L + lda * k * L], lda, T_iter, ldt_iter);
+        //LAPACKE_dgeqrt(LAPACK_COL_MAJOR, Nk, L, L, &A[(k + 1) * L + lda * k * L], lda, T_iter, ldt_iter);
+        tsqr(LAPACK_COL_MAJOR, Nk, L, &A[(k + 1) * L + lda * k * L], lda, T_iter, ldt_iter);
         // print_matrix("T iter = ", L, L, T_iter, ldt_iter);
         // TにT_iterを代入
         print_matrix("T iter = ", L, L, T_iter, ldt_iter);
