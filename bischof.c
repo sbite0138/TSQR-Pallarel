@@ -1,6 +1,6 @@
 #include <assert.h>
-#include <cblas.h>
-#include <lapacke.h>
+#include <mkl_cblas.h>
+#include <mkl_lapacke.h>
 #include <math.h>
 #include <omp.h> // for a timing routine.
 #include <stdio.h>
@@ -310,12 +310,13 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt)
     free(T_iter);
 }
 
-int main(void)
+int main(int argc,char **argv)
 {
     unsigned long const random_seed = 100;
     srand(random_seed);
 
-    size_t const m = 1000; // 帯行列化する行列のサイズ
+    // size_t const m = 10000; // 帯行列化する行列のサイズ
+    size_t const m = atoi(argv[1]); // 帯行列化する行列のサイズ
     size_t const lda = m + 1;
     int L = 10; //帯行列化時の幅
 
@@ -347,14 +348,16 @@ int main(void)
     // aのノルムを計算しておく
     //    double norm_a = calc_Frobenius_norm(m, m, a, lda);
     //Bischofのアルゴリズム実行
+    double t1=omp_get_wtime();   
     bischof(m, L, a, lda, T, L);
-    print_matrix("A = ", m, m, b, lda);
+    printf("time : %lf [sec]\n",omp_get_wtime()-t1);
+    // print_matrix("A = ", m, m, b, lda);
 
-    print_matrix("B = ", m, m, a, lda);
+    // print_matrix("B = ", m, m, a, lda);
 
     // bはaのコピーなので，この順番が正しい
 
-    check(m, L, b, lda, a, lda, T, L);
+    //check(m, L, b, lda, a, lda, T, L);
 
     //Qが直交行列かQQ^Tを計算することで確かめる
     // cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, m, m, m, 1.0, Q, m, Q, m, 0.0, tmp, lda);
