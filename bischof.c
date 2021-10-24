@@ -227,6 +227,7 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
 
     for (int k = 0; k < N / L - 1; k++)
     {
+        print_matrix("A = ", N, N, A, lda);
         printf("iteration %d/%d\n", k + 1, N / L - 1);
         int Nk = N - L - k * L;
         // Aの(k+1,k)ブロック以下をQR分解する
@@ -271,6 +272,7 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
                     else if (i > j)
                     {
                         V[i + j * Nk] = a_part[i + j * lda];
+                        a_part[i + j * lda] = 0.0;
                     }
                     else
                     {
@@ -317,7 +319,7 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
 
         // Aをrank-2k更新する
         measure_time(
-            cblas_dsyr2k(CblasColMajor, CblasUpper, CblasNoTrans, Nk, L, -1.0, V, Nk, update_Q, Nk, 1.0, &A[(k + 1) * L + lda * (k + 1) * L], lda));
+            cblas_dsyr2k(CblasColMajor, CblasLower, CblasNoTrans, Nk, L, -1.0, V, Nk, update_Q, Nk, 1.0, &A[(k + 1) * L + lda * (k + 1) * L], lda));
 
         measure_time(
             free(update_P);
@@ -331,7 +333,7 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
         for (int i = 0; i < N; i++) {
             for (int j = i; j < N; j++)
             {
-                A[j + i * lda] = A[i + j * lda];
+                A[i + j * lda] = A[j + i * lda];
             }
         });
 }
@@ -383,6 +385,7 @@ int main(int argc, char **argv)
     // Bischofのアルゴリズム実行
     // double t1=omp_get_wtime();
     measure_time(bischof(m, L, a, lda, T, L, Y, m));
+    print_matrix("B= ", m, m, a, lda);
     // printf("time : %lf [sec]\n",omp_get_wtime()-t1);
     print_matrix("L = ", L, m, T, L);
     print_matrix("Y = ", m, m, Y, m);
