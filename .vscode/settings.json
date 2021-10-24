@@ -1,6 +1,7 @@
 {
     "C_Cpp.default.includePath": [
-        "./OpenBLAS-0.3.13/lapack-netlib/LAPACKE/include "
+        "./OpenBLAS-0.3.13/lapack-netlib/LAPACKE/include",
+        "./OpenBLAS-0.3.13/lapack-netlib"
     ],
     "files.associations": {
         "lapacke_utils.h": "c"

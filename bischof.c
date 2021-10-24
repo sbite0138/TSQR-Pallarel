@@ -1,26 +1,31 @@
 #include <assert.h>
+#define ON_LOCAL
+#ifdef ON_LOCAL
+#include <cblas.h>
+#include <lapacke.h>
+#else
 #include <mkl_cblas.h>
 #include <mkl_lapacke.h>
+#endif
 #include <math.h>
 #include <omp.h> // for a timing routine.
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
-#define measure_time(x)                                             \
-    do                                                              \
-    {                                                               \
-        double start = omp_get_wtime();                             \
-        {                                                           \
-            x;                                                      \
-        }                                                           \
-        double end = omp_get_wtime();                               \
-        printf("@ %d: %s: %lf [sec]\n", __LINE__, #x, end - start); \
+#define measure_time(x)                 \
+    do                                  \
+    {                                   \
+        double start = omp_get_wtime(); \
+        {                               \
+            x;                          \
+        }                               \
+        double end = omp_get_wtime();   \
     } while (0)
 // (m,n)次元でleading dimensionがldaの行列aの要素を，msgで指定された文字列の後に出力する．（デバッグ用）
 void print_matrix(char *msg, int m, int n, double *a, int lda)
 {
-    return;
+    //  return;
     printf("================================\n");
     printf("%s\n", msg);
     printf("[\n");
@@ -190,7 +195,7 @@ void check(int N, int L, double *A, int lda, double *B, int ldb, double *T, int 
             }
         }
     }
-    //QBQ^Tを計算することで，帯行列化したBから元の行列Aを復元する
+    // QBQ^Tを計算することで，帯行列化したBから元の行列Aを復元する
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, N, N, N, 1.0, Q, N, B, ldb, 0.0, tmp, N);
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, N, N, N, 1.0, tmp, N, Q, N, 0.0, B, ldb);
 
@@ -211,7 +216,7 @@ void check(int N, int L, double *A, int lda, double *B, int ldb, double *T, int 
 }
 
 // (N,N)次元の実対称行列A(leading dimensionはlda)を帯行列化し、変換後の帯行列BとB=QAQ^tなるQを求める。関数終了時にAの要素はBの要素で上書きされる
-void bischof(int N, int L, double *A, int lda, double *T, int ldt)
+void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, int ldy)
 {
     int nb = L;
     int ldt_iter = nb;
@@ -230,8 +235,7 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt)
         // TにT_iterを代入
         print_matrix("T iter = ", L, L, T_iter, ldt_iter);
         measure_time(
-            for (int i = 0; i < L; i++)
-            {
+            for (int i = 0; i < L; i++) {
                 for (int j = 0; j < L; j++)
                 {
                     if (j >= i)
@@ -257,8 +261,7 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt)
 
         // Vにa_partの下三角部分を代入する(LAPACKE_dgeqrtを実行しているので，a_partの下三角部分にはQのcompact-WY表現の一部が入っている)
         measure_time(
-            for (int i = 0; i < Nk; i++)
-            {
+            for (int i = 0; i < Nk; i++) {
                 for (int j = 0; j < L; j++)
                 {
                     if (i == j)
@@ -275,11 +278,18 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt)
                     }
                 }
             });
-
+        assert(L == 2);
+        // YにVを代入
+        for (int j = 0; j < L; j++)
+        {
+            for (int i = 0; i < Nk; i++)
+            {
+                Y[i + (j + L * k) * ldy] = V[i + j * Nk];
+            }
+        }
         // a_partの下三角部分を0クリアし，上三角部分の要素の値を，その要素の位置と対称な位置へ代入する（Aは対称行列なので）
         measure_time(
-            for (int i = L * k + L; i < N; i++)
-            {
+            for (int i = L * k + L; i < N; i++) {
                 for (int j = L * k; j < L * (k + 1); j++)
                 {
                     A[j + i * lda] = A[i + j * lda];
@@ -296,8 +306,7 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt)
             cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, L, 1.0, T_iter, ldt_iter, update_tmp, Nk, 0.0, update_beta, L););
         // Qを構築する
         measure_time(
-            for (int i = 0; i < Nk; i++)
-            {
+            for (int i = 0; i < Nk; i++) {
                 for (int j = 0; j < L; j++)
                 {
                     update_Q[i + j * Nk] = update_P[i + j * Nk];
@@ -319,8 +328,7 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt)
     }
     free(T_iter);
     measure_time(
-        for (int i = 0; i < N; i++)
-        {
+        for (int i = 0; i < N; i++) {
             for (int j = i; j < N; j++)
             {
                 A[j + i * lda] = A[i + j * lda];
@@ -334,14 +342,21 @@ int main(int argc, char **argv)
     srand(random_seed);
 
     // size_t const m = 10000; // 帯行列化する行列のサイズ
+    if (argc != 2)
+    {
+        printf("Usage %s matrix_size\n", argv[0]);
+        return 0;
+    }
     size_t const m = atoi(argv[1]); // 帯行列化する行列のサイズ
     size_t const lda = m + 1;
-    int L = 10; //帯行列化時の幅
+    int L = 2; //帯行列化時の幅
 
     double *const a = malloc(sizeof(double) * m * lda); // 帯行列化する行列
     double *const b = malloc(sizeof(double) * m * lda); // aのコピーを格納する行列
     // double *Q = malloc(m * m * sizeof(double));           // Bischofのアルゴリズムで計算されるQを格納する行列
-    double *T = calloc(L * m, sizeof(double));            // Bischofのアルゴリズムで計算されるQを格納する行列
+    double *T = calloc(L * m, sizeof(double)); // Bischofのアルゴリズムで計算されるQのcompact-WY表現を格納する行列
+    double *Y = calloc(m * m, sizeof(double)); // Bischofのアルゴリズムで計算されるQのcompact-WY表現を格納する行列
+
     double *const tmp = malloc(sizeof(double) * m * lda); //計算に使う一時的な行列
 
     // aの値を0~1の乱数で初期化する
@@ -365,20 +380,21 @@ int main(int argc, char **argv)
     // print_matrix("A= ", m, m, a, lda);
     // aのノルムを計算しておく
     //    double norm_a = calc_Frobenius_norm(m, m, a, lda);
-    //Bischofのアルゴリズム実行
+    // Bischofのアルゴリズム実行
     // double t1=omp_get_wtime();
-    measure_time(bischof(m, L, a, lda, T, L));
+    measure_time(bischof(m, L, a, lda, T, L, Y, m));
     // printf("time : %lf [sec]\n",omp_get_wtime()-t1);
-    // print_matrix("A = ", m, m, b, lda);
+    print_matrix("L = ", L, m, T, L);
+    print_matrix("Y = ", m, m, Y, m);
 
     // print_matrix("B = ", m, m, a, lda);
 
     // bはaのコピーなので，この順番が正しい
 
-    //check(m, L, b, lda, a, lda, T, L);
+    // check(m, L, b, lda, a, lda, T, L);
 
-    //Qが直交行列かQQ^Tを計算することで確かめる
-    // cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, m, m, m, 1.0, Q, m, Q, m, 0.0, tmp, lda);
+    // Qが直交行列かQQ^Tを計算することで確かめる
+    //  cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, m, m, m, 1.0, Q, m, Q, m, 0.0, tmp, lda);
 
     // //直交行列ならこの値が1になっているはず
     // printf("norm of QQ^T = %e\n", calc_Frobenius_norm(m, m, tmp, lda) / sqrt(m));
@@ -403,6 +419,7 @@ int main(int argc, char **argv)
     free(b);
     free(tmp);
     free(T);
+    free(Y);
 
     return EXIT_SUCCESS;
 }
