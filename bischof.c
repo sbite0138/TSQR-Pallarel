@@ -203,13 +203,13 @@ void restore(int N, int L, double *B, int ldb, double *T, int ldt, double *Y, in
         free(update_QR);
         free(update_tmp);
         // free(V););
-        for (int j = 0; j < N; j++)
-        {
-            for (int i = j; i < N; i++)
+    }
+    for (int j = 0; j < N; j++)
+    {
+        for (int i = j; i < N; i++)
 
-            {
-                B[j + i * ldb] = B[i + j * ldb];
-            }
+        {
+            B[j + i * ldb] = B[i + j * ldb];
         }
     }
 }
@@ -332,14 +332,6 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
             free(update_Q);
             free(update_tmp);
             free(V););
-        measure_time(
-            for (int i = 0; i < N; i++)
-            {
-                for (int j = i; j < N; j++)
-                {
-                    A[i + j * lda] = A[j + i * lda];
-                }
-            });
     }
     free(T_iter);
     measure_time(
