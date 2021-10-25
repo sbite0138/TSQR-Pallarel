@@ -108,6 +108,111 @@ double *construct_Q(int m, int n, double *A, int lda, double *T, int ldt)
     return Q;
 }
 
+// 半帯幅LのN*N帯行列Bから，帯行列化前の行列Aを復元する
+// 復元には帯行列化で用いた直交行列のcompact-WY表現を格納した行列T，Yを用いる
+void restore(int N, int L, double *B, int ldb, double *T, int ldt, double *Y, int ldy)
+{
+    int nb = L;
+    int ldt_iter = nb;
+    assert(MIN(N, L) >= nb && nb >= 1);
+    assert(ldt_iter >= nb);
+    assert(N % L == 0);
+    double *T_iter; //= calloc(ldt_iter * L, sizeof(double));
+    for (int k = N / L - 2; k >= 0; k--)
+    {
+        print_matrix("A = ", N, N, B, ldb);
+
+        printf("iteration %d/%d\n", k + 1, N / L - 1);
+        int Nk = N - L - k * L;
+        double *T_iter = &T[0 + L * k * ldt];
+        double *V; // = malloc(Nk * L * sizeof(double));
+        V = &Y[0 + (L * k) * ldy];
+        print_matrix("T iter = ", L, L, T_iter, ldt_iter);
+        print_matrix("V = ", Nk, L, V, ldy);
+
+        double *update_tmp = malloc(Nk * Nk * sizeof(double));
+        double *update_P = malloc(Nk * L * sizeof(double));
+        double *update_beta = malloc(L * L * sizeof(double));
+        double *update_Q = malloc(Nk * L * sizeof(double));
+        //	);
+        // // Aの(k+1,k)ブロックの先頭アドレス
+        double *a_part = &B[(k + 1) * L + ldb * k * L];
+        print_matrix("A part = ", Nk, L, a_part, ldb);
+        double *update_QR = malloc(Nk * L * sizeof(double));
+
+        // QR=(I-VTV^T)a_partを計算する
+        // update_QR=V^Ta_part
+        cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, Nk, L, 1.0, V, ldy, a_part, ldb, 0.0, update_QR, Nk);
+        // update_tmp=Tupdate_QR
+        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, L, L, L, 1.0, T_iter, ldt, update_QR, Nk, 0.0, update_tmp, Nk);
+        // update_QR=Vupdate_tmp
+        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, 1.0, V, ldy, update_tmp, Nk, 0.0, update_QR, Nk);
+
+        // a_part=a_part-update_QR
+        for (int i = 0; i < Nk; i++)
+        {
+            for (int j = 0; j < L; j++)
+            {
+                a_part[i + j * ldb] -= update_QR[i + j * Nk];
+            }
+        }
+        for (int i = 0; i < N; i++)
+        {
+            for (int j = i; j < N; j++)
+            {
+                //  B[j + i * ldb] = B[i + j * ldb];
+                B[i + j * ldb] = B[j + i * ldb];
+            }
+        }
+        print_matrix("A part = ", Nk, L, a_part, ldb);
+        double *b_part = &B[(k + 1) * L + ldb * (k + 1) * L];
+        for (int i = 0; i < Nk; i++)
+            for (int j = 0; j < Nk; j++)
+            {
+                assert(b_part[i + j * ldb] == b_part[j + i * ldb]);
+            }
+        // 山本有作先生の『キャッシュマシン向け三重対角化アルゴリズムの性能予測方式』で説明されているBischofのアルゴリズム中のPを構築する
+        cblas_dsymm(CblasColMajor, CblasLeft, CblasLower, Nk, L, 1.0, &B[(k + 1) * L + ldb * (k + 1) * L], ldb, V, Nk, 0.0, update_tmp, Nk);
+        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, Nk, L, L, 1.0, update_tmp, Nk, T_iter, ldt_iter, 0.0, update_P, Nk);
+        ;
+
+        // betaを構築する
+        cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, Nk, 0.5, V, Nk, update_P, Nk, 0.0, update_tmp, Nk);
+        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, L, L, L, 1.0, T_iter, ldt_iter, update_tmp, Nk, 0.0, update_beta, L);
+
+        // Qを構築する
+        for (int i = 0; i < Nk; i++)
+        {
+            for (int j = 0; j < L; j++)
+            {
+                update_Q[i + j * Nk] = update_P[i + j * Nk];
+            }
+        }
+        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, -1.0, V, Nk, update_beta, L, 1.0, update_Q, Nk);
+        print_matrix("update_Q", Nk, L, update_Q, Nk);
+        // Aをrank-2k更新する
+        cblas_dsyr2k(CblasColMajor, CblasLower, CblasNoTrans, Nk, L, -1.0, V, Nk, update_Q, Nk, 1.0, &B[(k + 1) * L + ldb * (k + 1) * L], ldb);
+
+        // measure_time(
+        free(update_P);
+        free(update_beta);
+        free(update_Q);
+        free(update_QR);
+        free(update_tmp);
+        // free(V););
+        for (int j = 0; j < N; j++)
+        {
+            for (int i = j; i < N; i++)
+
+            {
+                B[j + i * ldb] = B[i + j * ldb];
+            }
+        }
+    }
+
+    printf("B(0,0) = %lf\n", B[0]);
+}
+
 // Aを半帯幅がLのN*N帯行列BとTによって構築し，その精度を調べる
 void check(int N, int L, double *A, int lda, double *B, int ldb, double *T, int ldt)
 {
@@ -236,7 +341,8 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
         // TにT_iterを代入
         print_matrix("T iter = ", L, L, T_iter, ldt_iter);
         measure_time(
-            for (int i = 0; i < L; i++) {
+            for (int i = 0; i < L; i++)
+            {
                 for (int j = 0; j < L; j++)
                 {
                     if (j >= i)
@@ -245,7 +351,7 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
                         T[i + (j + L * k) * ldt] = T_iter[i + j * ldt_iter] = 0.0;
                 }
             });
-        print_matrix("T = ", L, N, T, ldt);
+        //        print_matrix("T = ", L, N, T, ldt);
 
         // Aを更新する
 
@@ -262,7 +368,8 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
 
         // Vにa_partの下三角部分を代入する(LAPACKE_dgeqrtを実行しているので，a_partの下三角部分にはQのcompact-WY表現の一部が入っている)
         measure_time(
-            for (int i = 0; i < Nk; i++) {
+            for (int i = 0; i < Nk; i++)
+            {
                 for (int j = 0; j < L; j++)
                 {
                     if (i == j)
@@ -280,7 +387,8 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
                     }
                 }
             });
-        assert(L == 2);
+        print_matrix("V = ", Nk, L, V, Nk);
+
         // YにVを代入
         for (int j = 0; j < L; j++)
         {
@@ -291,7 +399,8 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
         }
         // a_partの下三角部分を0クリアし，上三角部分の要素の値を，その要素の位置と対称な位置へ代入する（Aは対称行列なので）
         measure_time(
-            for (int i = L * k + L; i < N; i++) {
+            for (int i = L * k + L; i < N; i++)
+            {
                 for (int j = L * k; j < L * (k + 1); j++)
                 {
                     A[j + i * lda] = A[i + j * lda];
@@ -308,7 +417,8 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
             cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, L, 1.0, T_iter, ldt_iter, update_tmp, Nk, 0.0, update_beta, L););
         // Qを構築する
         measure_time(
-            for (int i = 0; i < Nk; i++) {
+            for (int i = 0; i < Nk; i++)
+            {
                 for (int j = 0; j < L; j++)
                 {
                     update_Q[i + j * Nk] = update_P[i + j * Nk];
@@ -316,6 +426,7 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
             });
         measure_time(
             cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, -1.0, V, Nk, update_beta, L, 1.0, update_Q, Nk););
+        print_matrix("update_Q", Nk, L, update_Q, Nk);
 
         // Aをrank-2k更新する
         measure_time(
@@ -327,10 +438,19 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
             free(update_Q);
             free(update_tmp);
             free(V););
+        measure_time(
+            for (int i = 0; i < N; i++)
+            {
+                for (int j = i; j < N; j++)
+                {
+                    A[i + j * lda] = A[j + i * lda];
+                }
+            });
     }
     free(T_iter);
     measure_time(
-        for (int i = 0; i < N; i++) {
+        for (int i = 0; i < N; i++)
+        {
             for (int j = i; j < N; j++)
             {
                 A[i + j * lda] = A[j + i * lda];
@@ -351,7 +471,7 @@ int main(int argc, char **argv)
     }
     size_t const m = atoi(argv[1]); // 帯行列化する行列のサイズ
     size_t const lda = m + 1;
-    int L = 2; //帯行列化時の幅
+    int L = 3; //帯行列化時の幅
 
     double *const a = malloc(sizeof(double) * m * lda); // 帯行列化する行列
     double *const b = malloc(sizeof(double) * m * lda); // aのコピーを格納する行列
@@ -389,6 +509,8 @@ int main(int argc, char **argv)
     // printf("time : %lf [sec]\n",omp_get_wtime()-t1);
     print_matrix("L = ", L, m, T, L);
     print_matrix("Y = ", m, m, Y, m);
+    restore(m, L, a, lda, T, L, Y, m);
+    print_matrix("rescored A= ", m, m, a, lda);
 
     // print_matrix("B = ", m, m, a, lda);
 
