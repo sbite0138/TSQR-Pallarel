@@ -165,7 +165,31 @@ void restore(int N, int L, double *B, int ldb, double *T, int ldt, double *Y, in
             }
         }
         print_matrix("A part = ", Nk, L, a_part, ldb);
+
+        double *debug_Q = malloc(Nk * Nk * sizeof(double));
+        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, 1.0, V, ldy, T_iter, ldt_iter, 0.0, debug_Q, Nk);
+        print_matrix("debug Q = ", Nk, L, debug_Q, Nk);
+        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, Nk, Nk, L, 1.0, debug_Q, Nk, V, ldy, 0.0, update_tmp, Nk);
+        print_matrix("tmp = ", Nk, Nk, update_tmp, Nk);
+
+        for (int i = 0; i < Nk; i++)
+        {
+            for (int j = 0; j < Nk; j++)
+            {
+                if (i == j)
+                    debug_Q[i + j * Nk] = 1.0 - update_tmp[i + j * Nk];
+                else
+                    debug_Q[i + j * Nk] = -update_tmp[i + j * Nk];
+            }
+        }
+        print_matrix("tmp = ", Nk, Nk, update_tmp, Nk);
+        print_matrix("Q = ", Nk, Nk, debug_Q, Nk);
         double *b_part = &B[(k + 1) * L + ldb * (k + 1) * L];
+        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, Nk, Nk, 1.0, debug_Q, Nk, b_part, ldb, 0.0, update_tmp, Nk);
+        cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, Nk, Nk, Nk, 1.0, update_tmp, Nk, debug_Q, Nk, 0.0, b_part, ldb);
+        free(debug_Q);
+        /*
+
         for (int i = 0; i < Nk; i++)
             for (int j = 0; j < Nk; j++)
             {
@@ -174,7 +198,6 @@ void restore(int N, int L, double *B, int ldb, double *T, int ldt, double *Y, in
         // 山本有作先生の『キャッシュマシン向け三重対角化アルゴリズムの性能予測方式』で説明されているBischofのアルゴリズム中のPを構築する
         cblas_dsymm(CblasColMajor, CblasLeft, CblasLower, Nk, L, 1.0, &B[(k + 1) * L + ldb * (k + 1) * L], ldb, V, Nk, 0.0, update_tmp, Nk);
         cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans, Nk, L, L, 1.0, update_tmp, Nk, T_iter, ldt_iter, 0.0, update_P, Nk);
-        ;
 
         // betaを構築する
         cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, Nk, 0.5, V, Nk, update_P, Nk, 0.0, update_tmp, Nk);
@@ -192,7 +215,7 @@ void restore(int N, int L, double *B, int ldb, double *T, int ldt, double *Y, in
         print_matrix("update_Q", Nk, L, update_Q, Nk);
         // Aをrank-2k更新する
         cblas_dsyr2k(CblasColMajor, CblasLower, CblasNoTrans, Nk, L, -1.0, V, Nk, update_Q, Nk, 1.0, &B[(k + 1) * L + ldb * (k + 1) * L], ldb);
-
+*/
         // measure_time(
         free(update_P);
         free(update_beta);
