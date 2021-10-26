@@ -1,7 +1,9 @@
 {
     "C_Cpp.default.includePath": [
         "./OpenBLAS-0.3.13/lapack-netlib/LAPACKE/include",
-        "./OpenBLAS-0.3.13/lapack-netlib"
+        "./OpenBLAS-0.3.13/lapack-netlib",
+        "/usr/lib/x86_64-linux-gnu/openmpi/include/openmpi",
+        "/usr/lib/x86_64-linux-gnu/openmpi/include",
     ],
     "files.associations": {
         "lapacke_utils.h": "c"
