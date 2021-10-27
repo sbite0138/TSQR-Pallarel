@@ -21,7 +21,7 @@ qrprec: qrprec.c
 	$(CC) -isystem $(OPENBLAS_DIR)/lapack-netlib/LAPACKE/include $< -L$(OPENBLAS_DIR)/lib -lopenblas -lm -o $@
 
 parallel: bischof_parallel.c
-	 mpicc bischof_parallel.c -L'/home/sbite/github/scalapack-2.1.0/lib' -lscalapack -llapack -lgfortran -g -march=native -std=c11  -o $@
+	 mpicc bischof_parallel.c -L'/home/sbite/github/scalapack-2.1.0/lib' -lscalapack -llapack -lgfortran  -g -march=native -std=c11  -o $@
 
 clean:
 	rm -f qrprec

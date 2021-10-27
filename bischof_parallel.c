@@ -1,7 +1,8 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <assert.h>
+#include <unistd.h>
 //#include <mkl.h>
 #include <mpi.h>
 #define ADDR(t, v) \
@@ -41,6 +42,38 @@ Matrix *create_matrix(int nproc_row, int nproc_col, int global_row, int global_c
     return matrix;
 }
 
+void mul(Matrix *a, Matrix *b, Matrix *c)
+{
+    assert(a->global_col == b->global_row);
+    assert(a->global_row == c->global_row);
+    assert(b->global_col == c->global_col);
+    pdgemm_(ADDR(char, 'N'), ADDR(char, 'N'), &(a->global_row), &(b->global_col), &(a->global_col), ADDR(double, 1.0), &(a->data), ADDR(int, 1), ADDR(int, 1), &(a->desc), &(b->data), ADDR(int, 1), ADDR(int, 1), &(b->desc),
+            ADDR(double, 0.0), &(c->data), ADDR(int, 1), ADDR(int, 1), &(c->desc));
+}
+
+void set(Matrix *a, int row, int col, double val)
+{
+    row++;
+    col++;
+    pdelset_(a->data, &row, &col, a->desc, &val);
+}
+
+double get(Matrix *a, int row, int col)
+{
+    double val;
+    row++;
+    col++;
+    pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, a->data, &row, &col, a->desc);
+    return val;
+}
+
+void free_matrix(Matrix *matrix)
+{
+    free(matrix->data);
+    free(matrix->desc);
+    free(matrix);
+}
+
 // #include <mpi.h>
 // void blacs_pinfo_(int *, int *);
 // void MPI_Dims_create(int, int, int[]);
@@ -51,8 +84,11 @@ Matrix *create_matrix(int nproc_row, int nproc_col, int global_row, int global_c
 
 int main(int argc, char **argv)
 {
+    unsigned long const random_seed = 100;
+    srand(random_seed);
 
     MPI_Init(&argc, &argv);
+
     if (argc != 2)
     {
         printf("(*'^')q < too few arguments!\n");
@@ -60,134 +96,64 @@ int main(int argc, char **argv)
     }
     int m, n, k;
     m = n = k = atoi(argv[1]);
-    int nproc, nprow, npcol, dims[2], ierror;
+    int nproc, nproc_row, nproc_col, dims[2], ierror;
     int my_rank, my_row, my_col;
     int icontext;
-    int dlen_ = 9;
-    char transa = 'N';
     // int m = 1200, n = 800, k = 960;
-    int mb = 40, nb = 40;
-    // mb = nb = atoi(argv[2]);
-    double *a, *b, *c, *dummy;
-    int llda, lldb, lldc, ndummy = 2000;
-    int lmrow, lncol, lkrow, lkcol;
-    int *a_desc = (int *)malloc(dlen_ * sizeof(int));
-    int *b_desc = (int *)malloc(dlen_ * sizeof(int));
-    int *c_desc = (int *)malloc(dlen_ * sizeof(int));
-    int niter = 3;
-    int i, ii, jj;
-    double t1, t2, etime = 0.0;
     blacs_pinfo_(&my_rank, &nproc);
     dims[0] = dims[1] = 0;
     MPI_Dims_create(nproc, 2, dims);
-    if (my_rank == 0)
-        printf("dims: %d, %d\n", dims[0], dims[1]);
-    nprow = dims[0];
-    npcol = dims[1];
-
+    nproc_row = dims[0];
+    nproc_col = dims[1];
+    // sl_init_(&icontext, &nproc_row, &nproc_col);
     blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext);
-    blacs_gridinit_(&icontext, ADDR(char, 'R'), &nprow, &npcol);
-    blacs_gridinfo_(&icontext, &nprow, &npcol, &my_row, &my_col);
-    if (my_rank == 2)
-    {
-        printf("%d %d %d\n", my_rank, my_row, my_col);
-    }
-    lmrow = min(m, m / nprow) + mb;
-    lncol = min(n, n / npcol) + nb;
-    lkrow = min(k, k / nprow) + mb;
-    lkcol = min(k, k / npcol) + nb;
-
-    if (my_rank == 2)
-    {
-        printf("%d %d %d %d\n", lmrow, lncol, lkrow, lkcol);
-    }
-    llda = lmrow + 8;
-    lldb = lkrow + 8;
-    lldc = lmrow + 8;
-
-    a = (double *)malloc(llda * lkcol * sizeof(double));
-    b = (double *)malloc(lldb * lncol * sizeof(double));
-    c = (double *)malloc(lldc * lncol * sizeof(double));
-    dummy = (double *)malloc(ndummy * ndummy * sizeof(double));
-
-    printf("[%d] %p\n", my_rank, a);
-
-    // dummy = malloc(ndummy * ndummy * sizeof(double));
-
-    descinit_(a_desc, &m, &k, &mb, &nb, ADDR(int, 0), ADDR(int, 0), &icontext, &llda, &ierror);
-    descinit_(b_desc, &k, &n, &mb, &nb, ADDR(int, 0), ADDR(int, 0), &icontext, &lldb, &ierror);
-    descinit_(c_desc, &m, &n, &mb, &nb, ADDR(int, 0), ADDR(int, 0), &icontext, &lldc, &ierror);
-    printf("ierror = %d\n", ierror);
-
-    // initialize A
-    for (jj = 1; jj <= k; jj++)
-    {
-        for (ii = 1; ii <= m; ii++)
-        {
-            // if (my_rank == 0){
-            pdelset_(a, &ii, &jj, a_desc, ADDR(double, (double)(min(ii, jj))));
-            //      printf("%d %d\n", jj, ii);
-            //       }
-        }
-    }
-
-    // initialize B
-    for (jj = 1; jj <= n; jj++)
-    {
-        for (ii = 1; ii <= k; ii++)
-        {
-            //      if (my_rank == 0){
-            pdelset_(b, &ii, &jj, b_desc, ADDR(double, 1.0));
-            //      printf("%d %d\n", jj, ii);
-            //     }
-        }
-    }
-
-    // initialize C
-    for (jj = 1; jj <= n; jj++)
-    {
-        for (ii = 1; ii <= m; ii++)
-        {
-            //	    if (my_rank==0){
-            pdelset_(c, &ii, &jj, c_desc, ADDR(double, 1.0));
-            //      printf("%d %d\n", jj, ii);
-            //          }
-        }
-    }
-
-    for (i = 1; i <= niter; i++)
-    {
-        if (my_rank == 0)
-            printf("iter : %d\n", i);
-        t1 = MPI_Wtime();
-        // pdgemv_(ADDR(char, 'N'), &m, &n, ADDR(double, 1.0), a, ADDR(int, 1), ADDR(int, 1), a_desc, x, ADDR(int, 1), ADDR(int, 1), x_desc, ADDR(int, 1), ADDR(int, 1), y, ADDR(int, 1), ADDR(int, 1), y_desc, ADDR(int, 1));
-        pdgemm_(ADDR(char, 'N'), ADDR(char, 'N'), &m, &n, &k, ADDR(double, 1.0), a, ADDR(int, 1), ADDR(int, 1), a_desc, b, ADDR(int, 1), ADDR(int, 1), b_desc, ADDR(double, 2.0), c, ADDR(int, 1), ADDR(int, 1), c_desc);
-        t2 = MPI_Wtime();
-
-        etime = etime + (t2 - t1);
-        if (my_rank == 0)
-        {
-            printf("t1 = %f\n", t1);
-            printf("t2 = %f\n", t2);
-        }
-    }
-
-    ////END/////////
-    printf("(*'w')b < node %d complete computation \n", my_rank);
-    free(a);
-    free(b);
-    free(c);
-
-    free(a_desc);
-    free(b_desc);
-    free(c_desc);
-    free(dummy);
+    blacs_gridinit_(&icontext, ADDR(char, 'R'), &nproc_row, &nproc_col);
+    blacs_gridinfo_(&icontext, &nproc_row, &nproc_col, &my_row, &my_col);
     if (my_rank == 0)
     {
-        printf("GFLOPS : %f\n", (double)(m) * (double)(n) * (double)(k)*2.0 * (double)(niter) / ((double)(etime)*1.0e9));
+        printf("pid %d\n", getpid());
+        printf("dims: %d, %d\n", dims[0], dims[1]);
     }
-    Matrix *mm = create_matrix(nprow, npcol, 100, 100, 20, 20);
-    MPI_Finalize();
+    Matrix *mm = create_matrix(nproc_row, nproc_col, m, m, 40, 40);
+    //blacs_barrier_(&icontext, ADDR(char, 'A'));
+
+    printf("[%d] %d %d\n", my_rank, mm->local_row, mm->local_col);
+    printf("[%d] %p %p\n", my_rank, mm->data, mm->desc);
+
+    //pdelset_(mm->data, ADDR(int, 0), ADDR(int, 0), mm->desc, ADDR(double, 3.14));
+
+    for (int i = 0; i < mm->global_row; i++)
+    {
+        for (int j = 0; j < mm->global_col; j++)
+        {
+            //    if (my_rank == 0)
+            //     printf("%d %d\n", i, j);
+            set(mm, i, j, (double)(i * 100 + j));
+            //blacs_barrier_(&icontext, ADDR(char, 'A'));
+        }
+    }
+    printf("[%d] %d %d\n", my_rank, mm->local_row, mm->local_col);
+    blacs_barrier_(&icontext, ADDR(char, 'A'));
+
+    for (int i = 0; i < mm->global_row; i++)
+    {
+        for (int j = 0; j < mm->global_col; j++)
+        {
+            double val = get(mm, i, j);
+            if (my_rank == 0)
+                printf("%03d ", (int)val);
+        }
+        if (my_rank == 0)
+            printf("\n");
+    }
+    blacs_barrier_(&icontext, ADDR(char, 'A'));
+
+    // printf("end");
+    //free_matrix(mm);
+    //free_matrix(mm);
+    blacs_gridexit_(&icontext);
+    blacs_exit_(ADDR(int, 0));
+    //MPI_Finalize();
 
     return 0;
 }
