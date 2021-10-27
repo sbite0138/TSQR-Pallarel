@@ -235,7 +235,8 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
         // TにT_iterを代入
         // print_matrix("T iter = ", L, L, T_iter, ldt_iter);
         measure_time(
-            for (int i = 0; i < L; i++) {
+            for (int i = 0; i < L; i++)
+            {
                 for (int j = 0; j < L; j++)
                 {
                     if (j >= i)
@@ -261,7 +262,8 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
 
         // Vにa_partの下三角部分を代入する(LAPACKE_dgeqrtを実行しているので，a_partの下三角部分にはQのcompact-WY表現の一部が入っている)
         measure_time(
-            for (int i = 0; i < Nk; i++) {
+            for (int i = 0; i < Nk; i++)
+            {
                 for (int j = 0; j < L; j++)
                 {
                     if (i == j)
@@ -291,7 +293,8 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
         }
         // a_partの下三角部分を0クリアし，上三角部分の要素の値を，その要素の位置と対称な位置へ代入する（Aは対称行列なので）
         measure_time(
-            for (int i = L * k + L; i < N; i++) {
+            for (int i = L * k + L; i < N; i++)
+            {
                 for (int j = L * k; j < L * (k + 1); j++)
                 {
                     A[j + i * lda] = A[i + j * lda];
@@ -308,7 +311,8 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
             cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, L, 1.0, T_iter, ldt_iter, update_tmp, Nk, 0.0, update_beta, L););
         // Qを構築する
         measure_time(
-            for (int i = 0; i < Nk; i++) {
+            for (int i = 0; i < Nk; i++)
+            {
                 for (int j = 0; j < L; j++)
                 {
                     update_Q[i + j * Nk] = update_P[i + j * Nk];
@@ -331,7 +335,8 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
     }
     free(T_iter);
     measure_time(
-        for (int i = 0; i < N; i++) {
+        for (int i = 0; i < N; i++)
+        {
             for (int j = i; j < N; j++)
             {
                 A[i + j * lda] = A[j + i * lda];
