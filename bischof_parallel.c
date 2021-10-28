@@ -12,6 +12,9 @@ const int DESC_LEN = 9;
 const int block_row = 1;
 const int block_col = 1;
 
+int my_row;
+int my_col;
+
 typedef struct
 {
     double *data;
@@ -22,6 +25,7 @@ typedef struct
     int local_col;
     int leading_dimension;
 } Matrix;
+
 int min(int a, int b)
 {
     return (a < b ? a : b);
@@ -148,15 +152,16 @@ void pdgeqrf_wrap(int m, int n, Matrix *matrix, int row, int col, double *tau)
     // calculate length of work
     int lwork = -1;
     pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info);
-    lwork = (int)(work[0]);
+    lwork = (int)(work[0] + 2);
+    //  printf("lwork %f\n", work[0]);
 
     // reallocate and compute QR
     free(work);
     work = malloc(lwork * sizeof(double));
     pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info);
 
-    //    printf("lwork %f\n", work[0]);
-    //  printf("info %d\n", info);
+    // printf("info %d\n", info);
+
     free(work);
 }
 
@@ -169,16 +174,50 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
     assert(T->global_row >= n);
     assert(T->global_col >= n);
     double *tau = malloc(n * sizeof(double));
+
     pdgeqrf_wrap(m, n, matrix, row, col, tau);
-    set(T, 0, 0, tau[0]);
-    Matrix *Y = create_matrix(proc_row, proc_col, m, n, block_row, block_col);
+    // set(T, 0, 0, 3.14);
+    printf("%d (%d, %d) tau :", rank, my_row, my_col);
+    int desc[9];
+    desc[0] = 1;
+    desc[1] = matrix->desc[1];
+    desc[2] = 1;
+    desc[3] = n;
+    desc[4] = matrix->desc[4];
+    desc[5] = matrix->desc[5];
+    desc[6] = matrix->desc[6];
+    desc[7] = matrix->desc[7];
+    desc[8] = 1; //matrix->desc[8];
+
     for (int i = 0; i < n; i++)
     {
-        for (int j = 0; j < n; j++)
+        double val;
+
+        pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + i), desc);
+        printf("%f ", val);
+
+        //        printf("%f ", tau[i]);
+    }
+    printf("\n");
+
+    // {
+    //     for (int i = 0; i < n; i++)
+    //     {
+    //         printf("%f ", tau[i]);
+    //     }
+    //     printf("\n");
+    // }
+    Matrix *Y = create_matrix(proc_row, proc_col, m, n, block_row, block_col);
+    for (int i = 0; i < T->global_row; i++)
+    {
+        for (int j = 0; j < T->global_col; j++)
         {
             set(T, i, j, 0.0);
         }
     }
+    //set(T, 0, 0, tau[0]);
+    set(T, 0, 0, 3.14);
+    print_matrix("T=", T, rank);
 
     for (int i = 0; i < m; i++)
     {
@@ -200,11 +239,7 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
     Matrix *y = create_matrix(proc_row, proc_col, m, 1, block_row, block_col);
     for (int j = 1; j < n; j++)
     {
-        if (rank == 0)
-        {
-            printf("j %d\n", j);
-            printf("pid %d\n", getpid());
-        }
+        print_matrix("T=", T, rank);
 
         for (int i = 0; i < m; i++)
         {
@@ -226,7 +261,10 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
 
         pdgemm_wrap('T', 'N', j, 1, m, 1.0, Y, 0, 0, y, 0, 0, 0.0, tmp, 0, 0);
 
-        pdgemm_wrap('N', 'N', j, 1, j, -tau[j], T, 0, 0, tmp, 0, 0, 0.0, z, 0, 0);
+        //pdgemm_wrap('N', 'N', j, 1, j, -tau[j], T, 0, 0, tmp, 0, 0, 0.0, z, 0, 0);
+        pdgemm_wrap('N', 'N', j, 1, j, -3.14, T, 0, 0, tmp, 0, 0, 0.0, z, 0, 0);
+        print_matrix("tmp=", tmp, rank);
+        print_matrix("z=", z, rank);
 
         for (int i = 0; i < m; i++)
         {
@@ -249,7 +287,9 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
         {
             set(T, i, j, get(z, i, 0));
         }
-        set(T, j, j, tau[j]);
+        //set(T, j, j, tau[j]);
+        set(T, j, j, 3.14);
+        print_matrix("T=", T, rank);
 
         free_matrix(tmp);
         free_matrix(z);
@@ -288,7 +328,7 @@ int main(int argc, char **argv)
     int m, n, k;
     m = n = k = atoi(argv[1]);
     int nproc, nproc_row, nproc_col, dims[2], ierror;
-    int rank, my_row, my_col;
+    int rank;
     int icontext;
     // int m = 1200, n = 800, k = 960;
     blacs_pinfo_(&rank, &nproc);
@@ -330,8 +370,10 @@ int main(int argc, char **argv)
     blacs_barrier_(&icontext, ADDR(char, 'A'));
     // pdgemm_wrap('N', 'N', m, m, m, 1.0, a, 0, 0, b, 0, 0, 0.0, c, 0, 0);
 
-    Matrix *T = create_matrix(nproc_row, nproc_col, m, 12, block_row, block_col);
-    pdgeqrt_wrap(rank, nproc_row, nproc_col, m, 12, a, 0, 0, T);
+    Matrix *T = create_matrix(nproc_row, nproc_col, m, 5, block_row, block_col);
+    pdgeqrt_wrap(rank, nproc_row, nproc_col, m, 5, a, 0, 0, T);
+    // print_matrix("a=", a, rank);
+    // print_matrix("T=", T, rank);
 
     //  print_matrix("c = ", c, rank);
     blacs_barrier_(&icontext, ADDR(char, 'A'));
