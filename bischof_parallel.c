@@ -8,9 +8,8 @@
 #define ADDR(t, v) \
     &(t) { v }
 const int DESC_LEN = 9;
-
-const int block_row = 1;
-const int block_col = 1;
+int block_row;
+int block_col;
 
 int my_row;
 int my_col;
@@ -86,7 +85,7 @@ void print_matrix(char *msg, Matrix *matrix, int rank)
         {
             double val = get(matrix, i, j);
             if (rank == 0)
-                printf("%f,", val);
+                printf("%.18f,", val);
         }
         if (rank == 0)
             printf("],\n");
@@ -177,7 +176,6 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
 
     pdgeqrf_wrap(m, n, matrix, row, col, tau);
     // set(T, 0, 0, 3.14);
-    printf("%d (%d, %d) tau :", rank, my_row, my_col);
     int desc[9];
     desc[0] = 1;
     desc[1] = matrix->desc[1];
@@ -187,18 +185,18 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
     desc[5] = matrix->desc[5];
     desc[6] = matrix->desc[6];
     desc[7] = matrix->desc[7];
-    desc[8] = 1; //matrix->desc[8];
+    desc[8] = 1; // matrix->desc[8];
+    double val;
+    // printf("%d (%d, %d) tau :", rank, my_row, my_col);
+    // for (int i = 0; i < n; i++)
+    // {
+    //     double val;
+    //     pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + i), desc);
+    //     printf("%f ", val);
 
-    for (int i = 0; i < n; i++)
-    {
-        double val;
-
-        pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + i), desc);
-        printf("%f ", val);
-
-        //        printf("%f ", tau[i]);
-    }
-    printf("\n");
+    //     //        printf("%f ", tau[i]);
+    // }
+    // printf("\n");
 
     // {
     //     for (int i = 0; i < n; i++)
@@ -215,31 +213,21 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
             set(T, i, j, 0.0);
         }
     }
-    //set(T, 0, 0, tau[0]);
-    set(T, 0, 0, 3.14);
-    print_matrix("T=", T, rank);
+    pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + 0), desc);
+    // set(T, 0, 0, tau[0]);
+    set(T, 0, 0, val);
+    // print_matrix("T=", T, rank);
 
-    for (int i = 0; i < m; i++)
+    set(Y, 0, 0, 1.0);
+    for (int i = 1; i < m; i++)
     {
-        if (rank == 0)
-        {
-            printf("i %d\n", i);
-        }
-
-        if (i == 0)
-        {
-            set(Y, i, 0, 1.0);
-        }
-        else
-        {
-            set(Y, i, 0, get(matrix, row + i, col));
-        }
+        set(Y, i, 0, get(matrix, row + i, col));
     }
 
     Matrix *y = create_matrix(proc_row, proc_col, m, 1, block_row, block_col);
     for (int j = 1; j < n; j++)
     {
-        print_matrix("T=", T, rank);
+        // print_matrix("T=", T, rank);
 
         for (int i = 0; i < m; i++)
         {
@@ -260,36 +248,29 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
         Matrix *tmp = create_matrix(proc_row, proc_col, j, 1, block_row, block_col);
 
         pdgemm_wrap('T', 'N', j, 1, m, 1.0, Y, 0, 0, y, 0, 0, 0.0, tmp, 0, 0);
-
-        //pdgemm_wrap('N', 'N', j, 1, j, -tau[j], T, 0, 0, tmp, 0, 0, 0.0, z, 0, 0);
-        pdgemm_wrap('N', 'N', j, 1, j, -3.14, T, 0, 0, tmp, 0, 0, 0.0, z, 0, 0);
-        print_matrix("tmp=", tmp, rank);
-        print_matrix("z=", z, rank);
+        pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + j), desc);
+        pdgemm_wrap('N', 'N', j, 1, j, -val, T, 0, 0, tmp, 0, 0, 0.0, z, 0, 0);
+        // print_matrix("tmp=", tmp, rank);
+        // print_matrix("z=", z, rank);
 
         for (int i = 0; i < m; i++)
         {
-            if (rank == 0)
-            {
-                printf("loop %d/%d\n", i, m - 1);
-                printf("%d\n", i);
-            }
+            // if (rank == 0)
+            // {
+            //     printf("loop %d/%d\n", i, m - 1);
+            //     printf("%d\n", i);
+            // }
             // printf("[%d] start %d\n", rank, i);
-            double ttt = get(y, i, 0);
-            if (rank == 0)
-            {
-                printf("ok %f\n", ttt);
-            }
             // printf("[%d] done %d\n", rank, i);
-            set(Y, i, j, ttt);
+            set(Y, i, j, get(y, i, 0));
             // printf("%d\n", icontext);
         }
         for (int i = 0; i < j; i++)
         {
             set(T, i, j, get(z, i, 0));
         }
-        //set(T, j, j, tau[j]);
-        set(T, j, j, 3.14);
-        print_matrix("T=", T, rank);
+        pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + j), desc);
+        set(T, j, j, val);
 
         free_matrix(tmp);
         free_matrix(z);
@@ -320,14 +301,19 @@ int main(int argc, char **argv)
 
     MPI_Init(&argc, &argv);
 
-    if (argc != 2)
+    if (argc != 5)
     {
         printf("(*'^')q < too few arguments!\n");
         return 0;
     }
     int m, n, k;
-    m = n = k = atoi(argv[1]);
+    m = atoi(argv[1]);
+    n = atoi(argv[2]);
+    block_row = atoi(argv[3]);
+    block_col = atoi(argv[4]);
+
     int nproc, nproc_row, nproc_col, dims[2], ierror;
+
     int rank;
     int icontext;
     // int m = 1200, n = 800, k = 960;
@@ -340,14 +326,16 @@ int main(int argc, char **argv)
     blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext);
     blacs_gridinit_(&icontext, ADDR(char, 'R'), &nproc_row, &nproc_col);
     blacs_gridinfo_(&icontext, &nproc_row, &nproc_col, &my_row, &my_col);
-    if (rank == 0)
-    {
-        printf("pid %d\n", getpid());
-        printf("dims: %d, %d\n", dims[0], dims[1]);
-    }
-    Matrix *a = create_matrix(nproc_row, nproc_col, m, m, 1, 1);
-    Matrix *b = create_matrix(nproc_row, nproc_col, m, m, 1, 1);
-    Matrix *c = create_matrix(nproc_row, nproc_col, m, m, 1, 1);
+    // if (rank == 0)
+    // {
+    //     printf("pid %d\n", getpid());
+    //     printf("dims: %d, %d\n", dims[0], dims[1]);
+    //    }
+    Matrix *a = create_matrix(nproc_row, nproc_col, m, n, block_row, block_col);
+    Matrix *R = create_matrix(nproc_row, nproc_col, m, n, block_row, block_col);
+
+    // Matrix *b = create_matrix(nproc_row, nproc_col, m, m, 1, 1);
+    // Matrix *c = create_matrix(nproc_row, nproc_col, m, m, 1, 1);
     // blacs_barrier_(&icontext, ADDR(char, 'A'));
 
     // pdelset_(mm->data, ADDR(int, 0), ADDR(int, 0), mm->desc, ADDR(double, 3.14));
@@ -359,7 +347,7 @@ int main(int argc, char **argv)
             //    if (my_rank == 0)
             //     printf("%d %d\n", i, j);
             set(a, i, j, (double)rand() / (double)(RAND_MAX));
-            set(b, i, j, (double)rand() / (double)(RAND_MAX));
+            // set(b, i, j, (double)rand() / (double)(RAND_MAX));
             // blacs_barrier_(&icontext, ADDR(char, 'A'));
         }
     }
@@ -369,24 +357,56 @@ int main(int argc, char **argv)
     // printf("[%d] %d %d\n", my_rank, mm->local_row, mm->local_col);
     blacs_barrier_(&icontext, ADDR(char, 'A'));
     // pdgemm_wrap('N', 'N', m, m, m, 1.0, a, 0, 0, b, 0, 0, 0.0, c, 0, 0);
+    if (rank == 0)
+        printf("import numpy as np\n");
 
-    Matrix *T = create_matrix(nproc_row, nproc_col, m, 5, block_row, block_col);
-    pdgeqrt_wrap(rank, nproc_row, nproc_col, m, 5, a, 0, 0, T);
-    // print_matrix("a=", a, rank);
-    // print_matrix("T=", T, rank);
+    Matrix *T = create_matrix(nproc_row, nproc_col, n, n, block_row, block_col);
+    print_matrix("a=", a, rank);
+    pdgeqrt_wrap(rank, nproc_row, nproc_col, m, n, a, 0, 0, T);
+    for (int i = 0; i < a->global_row; i++)
+    {
+        for (int j = 0; j < a->global_col; j++)
+        {
+            if (i < j)
+            {
+                set(R, i, j, get(a, i, j));
+                set(a, i, j, 0.0);
+            }
+            else if (i == j)
+            {
+                set(R, i, j, get(a, i, j));
+                set(a, i, j, 1.0);
+            }
+            else
+            {
+                set(R, i, j, 0.0);
+            }
+            //    if (my_rank ==/ 0)
+            //     printf("%d %d\n", i, j);
+            // set(b, i, j, (double)rand() / (double)(RAND_MAX));
+            // blacs_barrier_(&icontext, ADDR(char, 'A'));
+        }
+    }
+
+    print_matrix("R=", R, rank);
+
+    print_matrix("Y=", a, rank);
+    print_matrix("T=", T, rank);
 
     //  print_matrix("c = ", c, rank);
     blacs_barrier_(&icontext, ADDR(char, 'A'));
 
     // printf("end");
     free_matrix(a);
-    free_matrix(b);
-    free_matrix(c);
+    // free_matrix(b);
+    // free_matrix(c);
 
     // free_matrix(mm);
     blacs_gridexit_(&icontext);
     blacs_exit_(ADDR(int, 0));
     // MPI_Finalize();
+    if (rank == 0)
+        printf("a = np.matrix(a)\nR = np.matrix(R)\nY = np.matrix(Y)\nT = np.matrix(T)\ntmp = -Y*T*Y.T\nfor i in range(len(tmp)):\n    tmp[i, i] += 1.0\ntmp = tmp*R\ntmp = tmp-a\nprint(\"error:\", np.linalg.norm(tmp, 2)/np.linalg.norm(a, 2))");
 
     return 0;
 }

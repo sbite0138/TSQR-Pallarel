@@ -6,6 +6,7 @@
         "/usr/lib/x86_64-linux-gnu/openmpi/include",
     ],
     "files.associations": {
-        "lapacke_utils.h": "c"
+        "lapacke_utils.h": "c",
+        "type_traits": "c"
     }
 }
