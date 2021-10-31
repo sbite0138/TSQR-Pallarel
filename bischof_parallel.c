@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
-//#include <mkl.h>
+#include <mkl.h>
 #include <mpi.h>
 #define ADDR(t, v) \
     &(t) { v }
@@ -13,6 +13,7 @@ int block_col;
 
 int my_row;
 int my_col;
+int icontext;
 
 typedef struct
 {
@@ -32,8 +33,8 @@ int min(int a, int b)
 
 Matrix *create_matrix(int nproc_row, int nproc_col, int global_row, int global_col, int block_row, int block_col)
 {
-    int icontext;
-    blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext);
+    // int icontext;
+    // blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext);
     Matrix *matrix = malloc(sizeof(Matrix));
     matrix->desc = malloc(DESC_LEN * sizeof(int));
     matrix->global_col = global_col;
@@ -166,8 +167,8 @@ void pdgeqrf_wrap(int m, int n, Matrix *matrix, int row, int col, double *tau)
 
 void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *matrix, int row, int col, Matrix *T)
 {
-    int icontext;
-    blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext);
+    // int icontext;
+    // blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext);
 
     assert(m >= n);
     assert(T->global_row >= n);
@@ -315,7 +316,7 @@ int main(int argc, char **argv)
     int nproc, nproc_row, nproc_col, dims[2], ierror;
 
     int rank;
-    int icontext;
+    // int icontext;
     // int m = 1200, n = 800, k = 960;
     blacs_pinfo_(&rank, &nproc);
     dims[0] = dims[1] = 0;
@@ -415,8 +416,6 @@ int main(int argc, char **argv)
             norm_diff += diff * diff;
             norm_a += val_a * val_a;
         }
-        if (rank == 0)
-            printf("%d\n", i);
     }
 
     if (rank == 0)
