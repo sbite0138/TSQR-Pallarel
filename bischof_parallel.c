@@ -111,7 +111,7 @@ void print_matrix(char *msg, Matrix *matrix, int rank)
         {
             double val = get(matrix, i, j);
             if (rank == 0)
-                printf("%.18f,", val);
+                printf("%12.8lf,", val);
         }
         if (rank == 0)
             printf("],\n");
@@ -172,21 +172,16 @@ void pdgeqrf_wrap(int m, int n, Matrix *matrix, int row, int col, double *tau)
     row++;
     col++;
     int info;
-    printf("aaa\n");
     double *work = malloc(32 * sizeof(double));
-    printf("bbb\n");
 
     // calculate length of work
     int lwork = -1;
     pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info);
-    printf("ccc\n");
     lwork = (int)(work[0] + 2);
-    printf("lwork %f\n", work[0]);
     // reallocate and compute QR
     free(work);
     work = malloc(lwork * sizeof(double));
     pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info);
-    printf("info %d\n", info);
     free(work);
 }
 
@@ -195,9 +190,6 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
 
     // int icontext;
     // blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext);
-    rprintf("%d %d\n", row, col);
-    rprintf("%d %d\n", m, n);
-
     assert(m >= n);
     assert(T->global_row >= n);
     assert(m + row <= matrix->global_row);
@@ -205,10 +197,7 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
 
     assert(T->global_col >= n);
     double *tau = malloc((n + col) * sizeof(double));
-    rprintf("start\n");
     pdgeqrf_wrap(m, n, matrix, row, col, tau);
-
-    rprintf("ok\n");
     int desc[9];
     desc[0] = 1;
     desc[1] = matrix->desc[1];
@@ -246,7 +235,6 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
     // }
 
     Matrix *Y = create_matrix(proc_row, proc_col, m, n, block_row, block_col);
-    rprintf("start\n");
     for (int i = 0; i < T->global_row; i++)
     {
         for (int j = 0; j < T->global_col; j++)
@@ -254,9 +242,8 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
             set(T, i, j, 0.0);
         }
     }
-    rprintf("done\n");
 
-    pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1), desc);
+    pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col), desc);
     // set(T, 0, 0, tau[0]);
     set(T, 0, 0, val);
     // print_matrix("T=", T, rank);
@@ -295,7 +282,7 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
         pdgemm_wrap('T', 'N', j, 1, m, 1.0, Y, 0, 0, y, 0, 0, 0.0, tmp, 0, 0);
 
         pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc);
-        //  printf("%lf ", val);
+        // printf("%lf ", val);
         pdgemm_wrap('N', 'N', j, 1, j, -val, T, 0, 0, tmp, 0, 0, 0.0, z, 0, 0);
         // print_matrix("tmp=", tmp, rank);
         // print_matrix("z=", z, rank);
@@ -317,7 +304,7 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
             set(T, i, j, get(z, i, 0));
         }
 
-        pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + j), desc);
+        pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc);
         set(T, j, j, val);
 
         free_matrix(tmp);
@@ -350,9 +337,10 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
         rprintf("iteration %d/%d\n", k + 1, N / L - 1);
         int Nk = N - L - k * L;
         // Aの(k+1,k)ブロック以下をQR分解する
-        rprintf("check 1\n");
+        // rprintf("check 1\n");
 
         pdgeqrt_wrap(rank, nproc_row, nproc_col, Nk, L, A, (k + 1) * L, k * L, T_iter);
+        // print_matrix("A=", A, rank);
 
         ////////////////////////////////!!!!!!!!!!!!!
         blacs_barrier_(&icontext, ADDR(char, 'A'));
@@ -363,7 +351,7 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
         // print_matrix("T iter = ", L, L, T_iter, ldt_iter);
         // TにT_iterを代入
         // print_matrix("T iter = ", L, L, T_iter, ldt_iter);
-        rprintf("check 2\n");
+        // rprintf("check 2\n");
         for (int i = 0; i < L; i++)
         {
             for (int j = 0; j < L; j++)
@@ -383,7 +371,7 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
         //        print_matrix("T = ", L, N, T, ldt);
 
         // Aを更新する
-        rprintf("check 3\n");
+        // rprintf("check 3\n");
 
         //        measure_time(
         Matrix *V = create_matrix(nproc_row, nproc_col, Nk, L, block_row, block_col);
@@ -397,7 +385,7 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
         Matrix *update_Q = create_matrix(nproc_row, nproc_col, Nk, L, block_row, block_col);
         // double *update_Q = malloc(Nk * L * sizeof(double));
         //	);
-        rprintf("check 4\n");
+        // rprintf("check 4\n");
 
         // Aの(k+1,k)ブロックの先頭アドレス
         // sdouble *a_part = &A[(k + 1) * L + lda * k * L];
@@ -429,7 +417,7 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
                 }
             }
         };
-        rprintf("check 5\n");
+        // rprintf("check 5\n");
 
         // print_matrix("V = ", Nk, L, V, Nk);
 
@@ -445,7 +433,9 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
                 blacs_barrier_(&icontext, ADDR(char, 'A'));
             }
         }
-        rprintf("check 6\n");
+        // print_matrix("Y=", Y, rank);
+
+        // rprintf("check 6\n");
 
         // a_partの下三角部分を0クリアし，上三角部分の要素の値を，その要素の位置と対称な位置へ代入する（Aは対称行列なので）
         for (int i = L * k + L; i < N; i++)
@@ -456,27 +446,33 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
                 set(A, j, i, get(A, i, j));
             }
         };
-        rprintf("check 7\n");
+        // rprintf("check 7\n");
 
         // 山本有作先生の『キャッシュマシン向け三重対角化アルゴリズムの性能予測方式』で説明されているBischofのアルゴリズム中のPを構築する
         // measure_time(
         // cblas_dsymm(CblasColMajor, CblasLeft, CblasLower, Nk, L, 1.0, &A[(k + 1) * L + lda * (k + 1) * L], lda, V, Nk, 0.0, update_tmp, Nk);
         pdsymm_wrap('L', 'L', Nk, L, 1.0, A, (k + 1) * L, (k + 1) * L, V, 0, 0, 0.0, update_tmp, 0, 0);
         // cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, 1.0, update_tmp, Nk, T_iter, ldt_iter, 0.0, update_P, Nk);
+        // print_matrix("T_iter", T_iter, rank);
+
         pdgemm_wrap('N', 'N', Nk, L, L, 1.0, update_tmp, 0, 0, T_iter, 0, 0, 0.0, update_P, 0, 0);
+        // print_matrix("update_P", update_P, rank);
+
         //);
-        rprintf("check 8\n");
+        // rprintf("check 8\n");
 
         // betaを構築する
         // measure_time(
         pdgemm_wrap('T', 'N', L, L, Nk, 0.5, V, 0, 0, update_P, 0, 0, 0.0, update_tmp, 0, 0);
         // cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, Nk, 0.5, V, Nk, update_P, Nk, 0.0, update_tmp, Nk);
         pdgemm_wrap('T', 'N', L, L, L, 1.0, T_iter, 0, 0, update_tmp, 0, 0, 0.0, update_beta, 0, 0);
-        rprintf("check 9\n");
-        // cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, L, 1.0, T_iter, ldt_iter, update_tmp, Nk, 0.0, update_beta, L);
+        // print_matrix("update_P", update_beta, rank);
+
+        // rprintf("check 9\n");
+        //  cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, L, 1.0, T_iter, ldt_iter, update_tmp, Nk, 0.0, update_beta, L);
         //);
-        // Qを構築する
-        // measure_time(
+        //  Qを構築する
+        //  measure_time(
         for (int i = 0; i < Nk; i++)
         {
             for (int j = 0; j < L; j++)
@@ -486,21 +482,25 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
             }
         }
         //);
-        rprintf("check 10\n");
+        // rprintf("check 10\n");
+        // print_matrix("update_Q=", update_Q, rank);
 
         // measure_time(
         pdgemm_wrap('N', 'N', Nk, L, L, -1.0, V, 0, 0, update_beta, 0, 0, 1.0, update_Q, 0, 0);
         // cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, -1.0, V, Nk, update_beta, L, 1.0, update_Q, Nk);
         //);
         //  print_matrix("update_Q", Nk, L, update_Q, Nk);
-        rprintf("check 11\n");
+        // rprintf("check 11\n");
 
         // Aをrank-2k更新する
-        // measure_time(
+        // measure_time(/
+        // print_matrix("V=", V, rank);
+        // print_matrix("update_Q=", update_Q, rank);
+
         pdsyr2k_wrap('L', 'N', Nk, L, -1.0, V, 0, 0, update_Q, 0, 0, 1.0, A, (k + 1) * L, (k + 1) * L);
         // cblas_dsyr2k(CblasColMajor, CblasLower, CblasNoTrans, Nk, L, -1.0, V, Nk, update_Q, Nk, 1.0, &A[(k + 1) * L + lda * (k + 1) * L], lda);
         //);
-        rprintf("check 12\n");
+        // rprintf("check 12\n");
         blacs_barrier_(&icontext, ADDR(char, 'A'));
 
         free_matrix(V);
@@ -508,7 +508,7 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
         free_matrix(update_beta);
         free_matrix(update_Q);
         free_matrix(update_tmp);
-        rprintf("check 13\n");
+        // rprintf("check 13\n");
     }
     free_matrix(T_iter);
     for (int i = 0; i < N; i++)
@@ -547,7 +547,7 @@ int main(int argc, char **argv)
     block_col = 64; // atoi(argv[4]);
 
     int nproc, nproc_row, nproc_col, dims[2], ierror;
-    int L = 2;
+    int L = 32;
     int rank;
 
     // int icontext;
@@ -558,8 +558,6 @@ int main(int argc, char **argv)
     MPI_Dims_create(nproc, 2, dims);
     nproc_row = dims[0];
     nproc_col = dims[1];
-
-    printf("nproc_row: %d nproc_col: %d\n", nproc_row, nproc_col);
     // sl_init_(&icontext, &nproc_row, &nproc_col);
     blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext);
     blacs_gridinit_(&icontext, ADDR(char, 'R'), &nproc_row, &nproc_col);
@@ -577,10 +575,11 @@ int main(int argc, char **argv)
             set(A, j, i, r);
         }
     }
-
+    //    print_matrix("A=", A, rank);
     bischof(rank, nproc_row, nproc_col, m, L, A, T, Y);
-    rprintf("free\n");
-    print_matrix("A=,", A, rank);
+    //  print_matrix("B=", A, rank);
+    double val = get(A, 0, 0);
+    rprintf("%lf\n", val);
     free_matrix(A);
     free_matrix(T);
     free_matrix(Y);

@@ -227,10 +227,11 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
     for (int k = 0; k < N / L - 1; k++)
     {
         // print_matrix("A = ", N, N, A, lda);
-        printf("iteration %d/%d\n", k + 1, N / L - 1);
+        //  printf("iteration %d/%d\n", k + 1, N / L - 1);
         int Nk = N - L - k * L;
         // Aの(k+1,k)ブロック以下をQR分解する
         measure_time(LAPACKE_dgeqrt(LAPACK_COL_MAJOR, Nk, L, L, &A[(k + 1) * L + lda * k * L], lda, T_iter, ldt_iter));
+        //        print_matrix("A=", N, N, A, lda);
         // print_matrix("T iter = ", L, L, T_iter, ldt_iter);
         // TにT_iterを代入
         // print_matrix("T iter = ", L, L, T_iter, ldt_iter);
@@ -289,6 +290,8 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
                 Y[i + (j + L * k) * ldy] = V[i + j * Nk];
             }
         }
+        // print_matrix("Y=", Nk, L, Y, ldy);
+
         // a_partの下三角部分を0クリアし，上三角部分の要素の値を，その要素の位置と対称な位置へ代入する（Aは対称行列なので）
         measure_time(
             for (int i = L * k + L; i < N; i++) {
@@ -300,12 +303,16 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
         // 山本有作先生の『キャッシュマシン向け三重対角化アルゴリズムの性能予測方式』で説明されているBischofのアルゴリズム中のPを構築する
         measure_time(
             cblas_dsymm(CblasColMajor, CblasLeft, CblasLower, Nk, L, 1.0, &A[(k + 1) * L + lda * (k + 1) * L], lda, V, Nk, 0.0, update_tmp, Nk);
+
             cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, 1.0, update_tmp, Nk, T_iter, ldt_iter, 0.0, update_P, Nk););
+        // print_matrix("update_P=", Nk, L, update_P, L);
 
         // betaを構築する
         measure_time(
             cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, Nk, 0.5, V, Nk, update_P, Nk, 0.0, update_tmp, Nk);
             cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, L, 1.0, T_iter, ldt_iter, update_tmp, Nk, 0.0, update_beta, L););
+        //  print_matrix("update_beta=", L, L, update_beta, L);
+
         // Qを構築する
         measure_time(
             for (int i = 0; i < Nk; i++) {
@@ -314,9 +321,13 @@ void bischof(int N, int L, double *A, int lda, double *T, int ldt, double *Y, in
                     update_Q[i + j * Nk] = update_P[i + j * Nk];
                 }
             });
+        // print_matrix("update_Q=", Nk, L, update_Q, Nk);
+
         measure_time(
             cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, -1.0, V, Nk, update_beta, L, 1.0, update_Q, Nk););
         //  print_matrix("update_Q", Nk, L, update_Q, Nk);
+        //  print_matrix("V=", Nk, L, V, Nk);
+        //  print_matrix("update_Q=", Nk, L, update_Q, Nk);
 
         // Aをrank-2k更新する
         measure_time(
@@ -352,7 +363,7 @@ int main(int argc, char **argv)
     }
     size_t const m = atoi(argv[1]); // 帯行列化する行列のサイズ
     size_t const lda = m + 1;
-    int L = 10; //帯行列化時の幅
+    int L = 2; //帯行列化時の幅
 
     double *const a = malloc(sizeof(double) * m * lda); // 帯行列化する行列
     double *const b = malloc(sizeof(double) * m * lda); // aのコピーを格納する行列
@@ -380,7 +391,7 @@ int main(int argc, char **argv)
         }
     }
 
-    // print_matrix("A= ", m, m, a, lda);
+    //  print_matrix("A= ", m, m, a, lda);
     // aのノルムを計算しておく
     //    double norm_a = calc_Frobenius_norm(m, m, a, lda);
     // Bischofのアルゴリズム実行
@@ -390,7 +401,7 @@ int main(int argc, char **argv)
     //  printf("time : %lf [sec]\n",omp_get_wtime()-t1);
     //  print_matrix("L = ", L, m, T, L);
     //  print_matrix("Y = ", m, m, Y, m);
-    restore(m, L, a, lda, T, L, Y, m);
+    /// restore(m, L, a, lda, T, L, Y, m);
     // print_matrix("rescored A= ", m, m, a, lda);
 
     // print_matrix("B = ", m, m, a, lda);
@@ -409,25 +420,26 @@ int main(int argc, char **argv)
     // cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, m, m, m, 1.0, Q, m, a, lda, 0.0, tmp, lda);
     // cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, m, m, m, 1.0, tmp, lda, Q, m, 0.0, a, lda);
 
-    double a_norm = calc_Frobenius_norm(m, m, b, lda);
-    // 復元したaと元のaとの誤差を計算する
-    for (size_t i = 0; i < m; ++i)
-    {
-        for (size_t j = 0; j < m; ++j)
-        {
-            b[i + lda * j] -= a[i + j * lda];
-        }
-    }
+    // double a_norm = calc_Frobenius_norm(m, m, b, lda);
+    // // 復元したaと元のaとの誤差を計算する
+    // for (size_t i = 0; i < m; ++i)
+    // {
+    //     for (size_t j = 0; j < m; ++j)
+    //     {
+    //         b[i + lda * j] -= a[i + j * lda];
+    //     }
+    // }
 
-    printf("norm  = %e\n", calc_Frobenius_norm(m, m, b, lda) / a_norm);
+    // printf("norm  = %e\n", calc_Frobenius_norm(m, m, b, lda) / a_norm);
 
-    printf("END\n");
+    // printf("END\n");
 
     free(a);
     free(b);
     free(tmp);
     free(T);
     free(Y);
+    return 0;
 
     return EXIT_SUCCESS;
 }
