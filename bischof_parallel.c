@@ -184,7 +184,7 @@ void pdgeqrf_wrap(int m, int n, Matrix *matrix, int row, int col, double *tau)
     printf("lwork %f\n", work[0]);
     // reallocate and compute QR
     free(work);
-    work = malloc((lwork + 1) * sizeof(double));
+    work = malloc(lwork * sizeof(double));
     pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info);
     printf("info %d\n", info);
     free(work);
@@ -192,6 +192,7 @@ void pdgeqrf_wrap(int m, int n, Matrix *matrix, int row, int col, double *tau)
 
 void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *matrix, int row, int col, Matrix *T)
 {
+
     // int icontext;
     // blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext);
     rprintf("%d %d\n", row, col);
@@ -203,9 +204,10 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
     assert(n + col <= matrix->global_col);
 
     assert(T->global_col >= n);
-    double *tau = malloc(n * sizeof(double));
+    double *tau = malloc((n + col) * sizeof(double));
     rprintf("start\n");
     pdgeqrf_wrap(m, n, matrix, row, col, tau);
+
     rprintf("ok\n");
     int desc[9];
     desc[0] = 1;
@@ -218,6 +220,12 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
     desc[7] = matrix->desc[7];
     desc[8] = 1;
     double val;
+    // for (int i = 0; i < n; i++)
+    // {
+    //     pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, col + 1 + i), desc);
+    //     printf("%lf ", val);
+    // }
+    // printf("\n");
     // printf("%d (%d, %d) tau :", rank, my_row, my_col);
     // for (int i = 0; i < n; i++)
     // {
@@ -248,7 +256,7 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
     }
     rprintf("done\n");
 
-    pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + 0), desc);
+    pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1), desc);
     // set(T, 0, 0, tau[0]);
     set(T, 0, 0, val);
     // print_matrix("T=", T, rank);
@@ -286,7 +294,8 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
 
         pdgemm_wrap('T', 'N', j, 1, m, 1.0, Y, 0, 0, y, 0, 0, 0.0, tmp, 0, 0);
 
-        pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + j), desc);
+        pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc);
+        //  printf("%lf ", val);
         pdgemm_wrap('N', 'N', j, 1, j, -val, T, 0, 0, tmp, 0, 0, 0.0, z, 0, 0);
         // print_matrix("tmp=", tmp, rank);
         // print_matrix("z=", z, rank);
@@ -336,9 +345,7 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
     //    double *const T_iter = calloc(ldt_iter * L, sizeof(double));
     Matrix *T_iter = create_matrix(nproc_row, nproc_col, L, L, block_col, block_row);
     for (int k = 0; k < N / L - 1; k++)
-    // for (int k = 1; k < 2; k++)
     {
-
         // print_matrix("A = ", N, N, A, lda);
         rprintf("iteration %d/%d\n", k + 1, N / L - 1);
         int Nk = N - L - k * L;
@@ -346,6 +353,7 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
         rprintf("check 1\n");
 
         pdgeqrt_wrap(rank, nproc_row, nproc_col, Nk, L, A, (k + 1) * L, k * L, T_iter);
+
         ////////////////////////////////!!!!!!!!!!!!!
         blacs_barrier_(&icontext, ADDR(char, 'A'));
 
@@ -539,7 +547,7 @@ int main(int argc, char **argv)
     block_col = 64; // atoi(argv[4]);
 
     int nproc, nproc_row, nproc_col, dims[2], ierror;
-    int L = 64;
+    int L = 2;
     int rank;
 
     // int icontext;
@@ -572,11 +580,11 @@ int main(int argc, char **argv)
 
     bischof(rank, nproc_row, nproc_col, m, L, A, T, Y);
     rprintf("free\n");
+    print_matrix("A=,", A, rank);
     free_matrix(A);
     free_matrix(T);
     free_matrix(Y);
     MPI_Finalize();
-    return 0;
     // MPI_Finalize();
     // if (rank == 0)
     //     printf("a = np.matrix(a)\nR = np.matrix(R)\nY = np.matrix(Y)\nT = np.matrix(T)\ntmp = -Y*T*Y.T\nfor i in range(len(tmp)):\n    tmp[i, i] += 1.0\ntmp = tmp*R\ntmp = tmp-a\nprint(\"error:\", np.linalg.norm(tmp, 2)/np.linalg.norm(a, 2))");
