@@ -9,14 +9,15 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define ADDR(t, v) \
     &(t) { v }
-#define measure_time(x)                 \
-    do                                  \
-    {                                   \
-        double start = omp_get_wtime(); \
-        {                               \
-            x;                          \
-        }                               \
-        double end = omp_get_wtime();   \
+#define measure_time(x)                                                     \
+    do                                                                      \
+    {                                                                       \
+        double start = omp_get_wtime();                                     \
+        {                                                                   \
+            x;                                                              \
+        }                                                                   \
+        double end = omp_get_wtime();                                       \
+        printf("@%d %d: %s: %lf [sec]\n", rank, __LINE__, #x, end - start); \
     } while (0)
 #define rprintf(...)                                \
     do                                              \
@@ -197,7 +198,7 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
 
     assert(T->global_col >= n);
     double *tau = malloc((n + col) * sizeof(double));
-    pdgeqrf_wrap(m, n, matrix, row, col, tau);
+    measure_time(pdgeqrf_wrap(m, n, matrix, row, col, tau));
     int desc[9];
     desc[0] = 1;
     desc[1] = matrix->desc[1];
@@ -339,7 +340,7 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
         // Aの(k+1,k)ブロック以下をQR分解する
         // rprintf("check 1\n");
 
-        pdgeqrt_wrap(rank, nproc_row, nproc_col, Nk, L, A, (k + 1) * L, k * L, T_iter);
+        measure_time(pdgeqrt_wrap(rank, nproc_row, nproc_col, Nk, L, A, (k + 1) * L, k * L, T_iter));
         // print_matrix("A=", A, rank);
 
         ////////////////////////////////!!!!!!!!!!!!!
@@ -576,8 +577,7 @@ int main(int argc, char **argv)
         }
     }
     //    print_matrix("A=", A, rank);
-    bischof(rank, nproc_row, nproc_col, m, L, A, T, Y);
-    //  print_matrix("B=", A, rank);
+    measure_time(bischof(rank, nproc_row, nproc_col, m, L, A, T, Y)); //  print_matrix("B=", A, rank);
     double val = get(A, 0, 0);
     rprintf("%lf\n", val);
     free_matrix(A);
