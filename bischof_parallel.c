@@ -283,7 +283,6 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
     assert(MIN(N, L) >= nb && nb >= 1);
     assert(ldt_iter >= nb);
     assert(N % L == 0);
-    //    double *const T_iter = calloc(ldt_iter * L, sizeof(double));
     Matrix *T_iter = create_matrix(nproc_row, nproc_col, L, L, block_col, block_row);
     for (int k = 0; k < N / L - 1; k++)
     {
@@ -292,16 +291,12 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
         int Nk = N - L - k * L;
         // Aの(k+1,k)ブロック以下をQR分解する
         // rprintf("check 1\n");
-
         measure_time(pdgeqrt_wrap(rank, nproc_row, nproc_col, Nk, L, A, (k + 1) * L, k * L, T_iter));
         // print_matrix("A=", A, rank);
 
         ////////////////////////////////!!!!!!!!!!!!!
         blacs_barrier_(&icontext, ADDR(char, 'A'));
 
-        // LAPACK_COL_MAJOR, Nk, L, L, &A[(k + 1) * L + lda * k * L], lda, T_iter, ldt_iter);
-
-        // measure_time(LAPACKE_dgeqrt(LAPACK_COL_MAJOR, Nk, L, L, &A[(k + 1) * L + lda * k * L], lda, T_iter, ldt_iter));
         // print_matrix("T iter = ", L, L, T_iter, ldt_iter);
         // TにT_iterを代入
         // print_matrix("T iter = ", L, L, T_iter, ldt_iter);
@@ -311,38 +306,28 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
             for (int j = 0; j < L; j++)
             {
                 if (j >= i)
-                { // T[i + (j + L * k) * ldt] = T_iter[i + j * ldt_iter];
+                {
                     set(T, i, j + L * k, get(T_iter, i, j));
                 }
                 else
-                // T[i + (j + L * k) * ldt] = T_iter[i + j * ldt_iter] = 0.0;
                 {
                     set(T, i, j + L * k, 0.0);
                     set(T_iter, i, j, 0.0);
                 }
             }
         };
-        //        print_matrix("T = ", L, N, T, ldt);
+        // print_matrix("T = ", L, N, T, ldt);
 
         // Aを更新する
         // rprintf("check 3\n");
 
-        //        measure_time(
         Matrix *V = create_matrix(nproc_row, nproc_col, Nk, L, block_row, block_col);
-        // double *V = malloc(Nk * L * sizeof(double));
         Matrix *update_tmp = create_matrix(nproc_row, nproc_col, Nk, Nk, block_row, block_col);
-        // double *update_tmp = malloc(Nk * Nk * sizeof(double));
         Matrix *update_P = create_matrix(nproc_row, nproc_col, Nk, L, block_row, block_col);
-        // double *update_P = malloc(Nk * L * sizeof(double));
         Matrix *update_beta = create_matrix(nproc_row, nproc_col, L, L, block_row, block_col);
-        // double *update_beta = malloc(L * L * sizeof(double));
         Matrix *update_Q = create_matrix(nproc_row, nproc_col, Nk, L, block_row, block_col);
-        // double *update_Q = malloc(Nk * L * sizeof(double));
-        //	);
         // rprintf("check 4\n");
 
-        // Aの(k+1,k)ブロックの先頭アドレス
-        // sdouble *a_part = &A[(k + 1) * L + lda * k * L];
         int pad_row = (k + 1) * L;
         int pad_col = k * L;
         // print_matrix("A part = ", Nk, L, a_part, lda);
@@ -355,19 +340,15 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
                 if (i == j)
                 {
                     set(V, i, j, 1.0);
-                    // V[i + j * Nk] = 1.0;
                 }
                 else if (i > j)
                 {
                     set(V, i, j, get(A, pad_row + i, pad_col + j));
-                    // V[i + j * Nk] = a_part[i + j * lda];
                     set(A, pad_row + i, pad_col + j, 0.0);
-                    // a_part[i + j * lda] = 0.0;
                 }
                 else
                 {
                     set(V, i, j, 0.0);
-                    // V[i + j * Nk] = 0.0;
                 }
             }
         };
@@ -380,8 +361,6 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
         {
             for (int i = 0; i < Nk; i++)
             {
-                // Y[i + (j + L * k) * ldy] = V[i + j * Nk];
-                //  rprintf("%d %d\n", i, j);
                 blacs_barrier_(&icontext, ADDR(char, 'A'));
                 set(Y, i, j + L * k, get(V, i, j));
                 blacs_barrier_(&icontext, ADDR(char, 'A'));
@@ -396,64 +375,45 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
         {
             for (int j = L * k; j < L * (k + 1); j++)
             {
-                // A[j + i * lda] = A[i + j * lda];
                 set(A, j, i, get(A, i, j));
             }
         };
         // rprintf("check 7\n");
 
         // 山本有作先生の『キャッシュマシン向け三重対角化アルゴリズムの性能予測方式』で説明されているBischofのアルゴリズム中のPを構築する
-        // measure_time(
-        // cblas_dsymm(CblasColMajor, CblasLeft, CblasLower, Nk, L, 1.0, &A[(k + 1) * L + lda * (k + 1) * L], lda, V, Nk, 0.0, update_tmp, Nk);
         pdsymm_wrap('L', 'L', Nk, L, 1.0, A, (k + 1) * L, (k + 1) * L, V, 0, 0, 0.0, update_tmp, 0, 0);
-        // cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, 1.0, update_tmp, Nk, T_iter, ldt_iter, 0.0, update_P, Nk);
         // print_matrix("T_iter", T_iter, rank);
 
         pdgemm_wrap('N', 'N', Nk, L, L, 1.0, update_tmp, 0, 0, T_iter, 0, 0, 0.0, update_P, 0, 0);
         // print_matrix("update_P", update_P, rank);
 
-        //);
-        // rprintf("check 8\n");
-
         // betaを構築する
-        // measure_time(
         pdgemm_wrap('T', 'N', L, L, Nk, 0.5, V, 0, 0, update_P, 0, 0, 0.0, update_tmp, 0, 0);
-        // cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, Nk, 0.5, V, Nk, update_P, Nk, 0.0, update_tmp, Nk);
         pdgemm_wrap('T', 'N', L, L, L, 1.0, T_iter, 0, 0, update_tmp, 0, 0, 0.0, update_beta, 0, 0);
         // print_matrix("update_P", update_beta, rank);
 
         // rprintf("check 9\n");
-        //  cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, L, L, L, 1.0, T_iter, ldt_iter, update_tmp, Nk, 0.0, update_beta, L);
-        //);
+
         //  Qを構築する
-        //  measure_time(
         for (int i = 0; i < Nk; i++)
         {
             for (int j = 0; j < L; j++)
             {
                 set(update_Q, i, j, get(update_P, i, j));
-                // update_Q[i + j * Nk] = update_P[i + j * Nk];
             }
         }
-        //);
         // rprintf("check 10\n");
         // print_matrix("update_Q=", update_Q, rank);
 
-        // measure_time(
         pdgemm_wrap('N', 'N', Nk, L, L, -1.0, V, 0, 0, update_beta, 0, 0, 1.0, update_Q, 0, 0);
-        // cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nk, L, L, -1.0, V, Nk, update_beta, L, 1.0, update_Q, Nk);
-        //);
-        //  print_matrix("update_Q", Nk, L, update_Q, Nk);
+        // print_matrix("update_Q", Nk, L, update_Q, Nk);
         // rprintf("check 11\n");
 
         // Aをrank-2k更新する
-        // measure_time(/
         // print_matrix("V=", V, rank);
         // print_matrix("update_Q=", update_Q, rank);
 
         pdsyr2k_wrap('L', 'N', Nk, L, -1.0, V, 0, 0, update_Q, 0, 0, 1.0, A, (k + 1) * L, (k + 1) * L);
-        // cblas_dsyr2k(CblasColMajor, CblasLower, CblasNoTrans, Nk, L, -1.0, V, Nk, update_Q, Nk, 1.0, &A[(k + 1) * L + lda * (k + 1) * L], lda);
-        //);
         // rprintf("check 12\n");
         blacs_barrier_(&icontext, ADDR(char, 'A'));
 
@@ -470,7 +430,6 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
         for (int j = i; j < N; j++)
         {
             set(A, i, j, get(A, j, i));
-            // A[i + j * lda] = A[j + i * lda];
         }
     }
 }
