@@ -7,6 +7,15 @@
     ],
     "files.associations": {
         "lapacke_utils.h": "c",
-        "type_traits": "c"
+        "type_traits": "c",
+        "array": "c",
+        "*.tcc": "c",
+        "memory": "c",
+        "future": "c",
+        "istream": "c",
+        "functional": "c",
+        "tuple": "c",
+        "utility": "c",
+        "variant": "c"
     }
 }
