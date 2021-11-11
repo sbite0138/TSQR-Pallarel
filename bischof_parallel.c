@@ -3,6 +3,7 @@
 #include <mpi.h>
 #include <omp.h> // for a timing routine.
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
@@ -20,16 +21,16 @@
                                                     \
     } while (0)
 
-#define measure_time(x)                 \
-    do                                  \
-    {                                   \
-        double start = omp_get_wtime(); \
-        {                               \
-            x;                          \
-        }                               \
-        double end = omp_get_wtime();   \
+#define measure_time(x)                                                                                          \
+    do                                                                                                           \
+    {                                                                                                            \
+        double start = omp_get_wtime();                                                                          \
+        {                                                                                                        \
+            x;                                                                                                   \
+        }                                                                                                        \
+        double end = omp_get_wtime();                                                                            \
+        rprintf("@ {\"rank\":%d, \"line\":%d, \"cmd\":\"%s\", \"time\":%f}\n", rank, __LINE__, #x, end - start); \
     } while (0)
-//rprintf("@%d %d: %s: %f [sec]\n", rank, __LINE__, #x, end - start); \
 
 const int DESC_LEN = 9;
 int block_row;
@@ -38,6 +39,7 @@ int block_col;
 int my_row;
 int my_col;
 int icontext;
+int rank;
 
 typedef struct
 {
@@ -201,12 +203,12 @@ void pdgeqrf_wrap(int m, int n, Matrix *matrix, int row, int col, double *tau)
 
     // calculate length of work
     int lwork = -1;
-    pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info);
+    measure_time(pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info));
     lwork = (int)(work[0] + 2);
     // reallocate and compute QR
     free(work);
     work = malloc(lwork * sizeof(double));
-    pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info);
+    measure_time(pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info));
     free(work);
 }
 
@@ -242,34 +244,30 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
     set(T, 0, 0, val);
     // print_matrix("T=", T, rank);
     set(Y, 0, 0, 1.0);
-    for (int i = 1; i < m; i++)
-    {
-        set(Y, i, 0, get(matrix, row + i, col));
-    }
-    pdgemr2d_wrap(m - 1, 1, matrix, row + 1, col, Y, 1, 0);
+    measure_time(pdgemr2d_wrap(m - 1, 1, matrix, row + 1, col, Y, 1, 0));
     Matrix *y = create_matrix(proc_row, proc_col, m, 1, block_row, block_col);
     Matrix *z = create_matrix(proc_row, proc_col, n, 1, block_row, block_col);
     Matrix *tmp = create_matrix(proc_row, proc_col, n, 1, block_row, block_col);
 
     for (int j = 1; j < n; j++)
     {
-        pdlaset_wrap('A', j, 1, 0.0, 0.0, y, 0, 0);
-        set(y, j, 0, 1.0);
-        pdgemr2d_wrap(m - j - 1, 1, matrix, row + j + 1, col + j, y, j + 1, 0);
-        measure_time(pdgemm_wrap('T', 'N', j, 1, m, 1.0, Y, 0, 0, y, 0, 0, 0.0, tmp, 0, 0));
-
+        measure_time(pdlaset_wrap('A', j, 1, 0.0, 0.0, y, 0, 0));
+        measure_time(set(y, j, 0, 1.0));
+        measure_time(pdgemr2d_wrap(m - j - 1, 1, matrix, row + j + 1, col + j, y, j + 1, 0));
+        // measure_time(pdgemm_wrap('T', 'N', j, 1, m, 1.0, Y, 0, 0, y, 0, 0, 0.0, tmp, 0, 0));
+        measure_time(pdgemv_wrap('T', m, n, 1.0, Y, 0, 0, y, 0, 0, 1, 0.0, tmp, 0, 0, 1));
         measure_time(pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc));
         // printf("%lf ", val);
-        measure_time(pdgemm_wrap('N', 'N', j, 1, j, -val, T, 0, 0, tmp, 0, 0, 0.0, z, 0, 0));
+        measure_time(pdgemv_wrap('N', j, j, -val, T, 0, 0, tmp, 0, 0, 1, 0.0, z, 0, 0, 1));
+        // measure_time(pdgemm_wrap('N', 'N', j, 1, j, -val, T, 0, 0, tmp, 0, 0, 0.0, z, 0, 0));
+
         // print_matrix("tmp=", tmp, rank);
         // print_matrix("z=", z, rank);
-        pdgemr2d_wrap(m, 1, y, 0, 0, Y, 0, j);
-
-        pdgemr2d_wrap(j, 1, z, 0, 0, T, 0, j);
-        measure_time(
-            pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc));
-        measure_time(
-            set(T, j, j, val));
+        measure_time(pdgemr2d_wrap(m, 1, y, 0, 0, Y, 0, j));
+        measure_time(pdgemr2d_wrap(j, 1, z, 0, 0, T, 0, j));
+        measure_time(pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc));
+        // val=3.14;
+        measure_time(set(T, j, j, val));
     }
     free_matrix(tmp);
     free_matrix(z);
@@ -476,16 +474,10 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
         }
     }
 }
-// #include <mpi.h>
-// void blacs_pinfo_(int *, int *);
-// void MPI_Dims_create(int, int, int[]);
-// void blacs_get_(int *, int *, int *);
-// void blacs_gridinit_(int *, char *, int *, int *);
-// void blacs_gridinfo_(int *, int *, int *, int *, int *);
-// void descinit_(int *, int *, int *, int *, int *, int *, int *, int *, int *, int *);
 
 int main(int argc, char **argv)
 {
+    bool print_checkcode = false;
     unsigned long const random_seed = 100;
     srand(random_seed);
 
@@ -504,17 +496,14 @@ int main(int argc, char **argv)
 
     int nproc, nproc_row, nproc_col, dims[2], ierror;
     int L = 2;
-    int rank;
 
-    // int icontext;
-    // int m = 1200, n = 800, k = 960;
     blacs_pinfo_(&rank, &nproc);
     dims[0] = dims[1] = 0;
 
     MPI_Dims_create(nproc, 2, dims);
     nproc_row = dims[0];
     nproc_col = dims[1];
-    // sl_init_(&icontext, &nproc_row, &nproc_col);
+
     blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext);
     blacs_gridinit_(&icontext, ADDR(char, 'R'), &nproc_row, &nproc_col);
     blacs_gridinfo_(&icontext, &nproc_row, &nproc_col, &my_row, &my_col);
@@ -525,75 +514,59 @@ int main(int argc, char **argv)
 
     Matrix *R = create_matrix(nproc_row, nproc_col, m, n, block_row, block_col);
 
-    // Matrix *b = create_matrix(nproc_row, nproc_col, m, m, 1, 1);
-    // Matrix *c = create_matrix(nproc_row, nproc_col, m, m, 1, 1);
-    // blacs_barrier_(&icontext, ADDR(char, 'A'));
-
-    // pdelset_(mm->data, ADDR(int, 0), ADDR(int, 0), mm->desc, ADDR(double, 3.14));
-    for (size_t i = 0; i < m; ++i)
-    {
+    measure_time(for (size_t i = 0; i < m; ++i) {
         for (size_t j = 0; j < n; ++j)
         {
             double r = (double)(rand()) / RAND_MAX;
             set(A, i, j, r);
-            // set(A, j, i, r);
         }
-    }
-    // print_matrix("a = ", a, rank);
-    // print_matrix("b = ", b, rank);
-    // printf("[%d] %d %d\n", my_rank, mm->local_row, mm->local_col);
+    });
     blacs_barrier_(&icontext, ADDR(char, 'A'));
-    // pdgemm_wrap('N', 'N', m, m, m, 1.0, a, 0, 0, b, 0, 0, 0.0, c, 0, 0);
-    if (rank == 0)
-        printf("import numpy as np\n");
-
-    print_matrix("A=", A, rank);
-    pdgeqrt_wrap(rank, nproc_row, nproc_col, m, n, A, 0, 0, T);
-    for (int i = 0; i < A->global_row; i++)
+    if (print_checkcode)
     {
-        for (int j = 0; j < A->global_col; j++)
+        rprintf("import numpy as np\n");
+
+        print_matrix("A=", A, rank);
+    }
+    measure_time(pdgeqrt_wrap(rank, nproc_row, nproc_col, m, n, A, 0, 0, T));
+    blacs_barrier_(&icontext, ADDR(char, 'A'));
+    if (print_checkcode)
+    {
+        for (int i = 0; i < A->global_row; i++)
         {
-            if (i < j)
+            for (int j = 0; j < A->global_col; j++)
             {
-                set(R, i, j, get(A, i, j));
-                set(A, i, j, 0.0);
+                if (i < j)
+                {
+                    set(R, i, j, get(A, i, j));
+                    set(A, i, j, 0.0);
+                }
+                else if (i == j)
+                {
+                    set(R, i, j, get(A, i, j));
+                    set(A, i, j, 1.0);
+                }
+                else
+                {
+                    set(R, i, j, 0.0);
+                }
             }
-            else if (i == j)
-            {
-                set(R, i, j, get(A, i, j));
-                set(A, i, j, 1.0);
-            }
-            else
-            {
-                set(R, i, j, 0.0);
-            }
-            //    if (my_rank ==/ 0)
-            //     printf("%d %d\n", i, j);
-            // set(b, i, j, (double)rand() / (double)(RAND_MAX));
-            // blacs_barrier_(&icontext, ADDR(char, 'A'));
         }
+        print_matrix("R=", R, rank);
+
+        print_matrix("Y=", A, rank);
+        print_matrix("T=", T, rank);
+        rprintf("A = np.matrix(A)\nR = np.matrix(R)\nY = np.matrix(Y)\nT = np.matrix(T)\ntmp = -Y*T*Y.T\nfor i in range(len(tmp)):\n    tmp[i, i] += 1.0\ntmp = tmp*R\ntmp = tmp-A\nprint(\"error:\", np.linalg.norm(tmp, 2)/np.linalg.norm(A, 2))");
     }
 
-    print_matrix("R=", R, rank);
-
-    print_matrix("Y=", A, rank);
-    print_matrix("T=", T, rank);
-
-    //  print_matrix("c = ", c, rank);
     blacs_barrier_(&icontext, ADDR(char, 'A'));
 
-    //    print_matrix("A=", A, rank);
-    //  measure_time(bischof(rank, nproc_row, nproc_col, m, L, A, T, Y));
-    measure_time(pdgeqrt_wrap(rank, nproc_row, nproc_col, m, n, A, 0, 0, T));
     double val = get(A, 0, 0);
     rprintf("%lf\n", val);
     free_matrix(A);
     free_matrix(T);
     free_matrix(Y);
-    if (rank == 0)
-        printf("A = np.matrix(A)\nR = np.matrix(R)\nY = np.matrix(Y)\nT = np.matrix(T)\ntmp = -Y*T*Y.T\nfor i in range(len(tmp)):\n    tmp[i, i] += 1.0\ntmp = tmp*R\ntmp = tmp-A\nprint(\"error:\", np.linalg.norm(tmp, 2)/np.linalg.norm(A, 2))");
 
     MPI_Finalize();
-    // MPI_Finalize();
     return 0;
 }
