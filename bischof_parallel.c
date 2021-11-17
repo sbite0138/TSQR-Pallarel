@@ -205,12 +205,12 @@ void pdgeqrf_wrap(int m, int n, Matrix *matrix, int row, int col, double *tau)
 
     // calculate length of work
     int lwork = -1;
-    measure_time(pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info));
+    (pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info));
     lwork = (int)(work[0] + 2);
     // reallocate and compute QR
     free(work);
     work = malloc(lwork * sizeof(double));
-    measure_time(pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info));
+    (pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info));
     free(work);
 }
 
@@ -225,7 +225,9 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
     assert(n + col <= matrix->global_col);
 
     assert(T->global_col >= n);
-    double *tau = malloc((n + col) * sizeof(double));
+    double *tau;
+    measure_time(
+        tau = malloc((n + col) * sizeof(double)));
     measure_time(pdgeqrf_wrap(m, n, matrix, row, col, tau));
     int desc[9];
     desc[0] = 1;
@@ -238,44 +240,54 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
     desc[7] = matrix->desc[7];
     desc[8] = 1;
     double val;
+    Matrix *Y;
+    measure_time(
+        Y = create_matrix(proc_row, proc_col, m, n, block_row, block_col););
+    measure_time(
+        pdlaset_wrap('A', T->global_row, T->global_col, 0.0, 0.0, T, 0, 0));
+    measure_time(pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col), desc));
 
-    Matrix *Y = create_matrix(proc_row, proc_col, m, n, block_row, block_col);
-    pdlaset_wrap('A', T->global_row, T->global_col, 0.0, 0.0, T, 0, 0);
-    pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col), desc);
     // set(T, 0, 0, tau[0]);
     set(T, 0, 0, val);
     // print_matrix("T=", T, rank);
-    set(Y, 0, 0, 1.0);
-    (pdgemr2d_wrap(m - 1, 1, matrix, row + 1, col, Y, 1, 0));
-    Matrix *y = create_matrix(proc_row, proc_col, m, 1, block_row, block_col);
-    Matrix *z = create_matrix(proc_row, proc_col, n, 1, block_row, block_col);
-    Matrix *tmp = create_matrix(proc_row, proc_col, n, 1, block_row, block_col);
+    measure_time(pdgemr2d_wrap(m, n, matrix, row, col, Y, 0, 0));
+    measure_time(pdlaset_wrap('U', Y->global_row, Y->global_col, 0.0, 1.0, Y, 0, 0));
+    Matrix *y;
+    Matrix *z;
+    Matrix *tmp;
 
+    measure_time(y = create_matrix(proc_row, proc_col, m, n, block_row, block_col);
+                 z = create_matrix(proc_row, proc_col, n, 1, block_row, block_col);
+                 tmp = create_matrix(proc_row, proc_col, n, 1, block_row, block_col));
+
+    measure_time(pdgemr2d_wrap(m, n, matrix, row, col, y, 0, 0));
+    measure_time(pdlaset_wrap('U', y->global_row, y->global_col, 0.0, 1.0, y, 0, 0));
     for (int j = 1; j < n; j++)
     {
-        (pdlaset_wrap('A', j, 1, 0.0, 0.0, y, 0, 0));
-        (set(y, j, 0, 1.0));
-        (pdgemr2d_wrap(m - j - 1, 1, matrix, row + j + 1, col + j, y, j + 1, 0));
-        // measure_time(pdgemm_wrap('T', 'N', j, 1, m, 1.0, Y, 0, 0, y, 0, 0, 0.0, tmp, 0, 0));
-        (pdgemv_wrap('T', m, n, 1.0, Y, 0, 0, y, 0, 0, 1, 0.0, tmp, 0, 0, 1));
-        (pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc));
+        // (pdlaset_wrap('A', j, 1, 0.0, 0.0, y, 0, 0));
+        // (set(y, j, 0, 1.0));
+        // (pdgemr2d_wrap(m - j - 1, 1, matrix, row + j + 1, col + j, y, j + 1, 0));
+        // // measure_time(pdgemm_wrap('T', 'N', j, 1, m, 1.0, Y, 0, 0, y, 0, 0, 0.0, tmp, 0, 0));
+        measure_time(pdgemv_wrap('T', m, j, 1.0, Y, 0, 0, y, 0, j, 1, 0.0, tmp, 0, 0, 1));
+        measure_time(pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc));
         // printf("%lf ", val);
-        (pdgemv_wrap('N', j, j, -val, T, 0, 0, tmp, 0, 0, 1, 0.0, z, 0, 0, 1));
+        measure_time(pdgemv_wrap('N', j, j, -val, T, 0, 0, tmp, 0, 0, 1, 0.0, z, 0, 0, 1));
         // measure_time(pdgemm_wrap('N', 'N', j, 1, j, -val, T, 0, 0, tmp, 0, 0, 0.0, z, 0, 0));
 
         // print_matrix("tmp=", tmp, rank);
         // print_matrix("z=", z, rank);
-        (pdgemr2d_wrap(m, 1, y, 0, 0, Y, 0, j));
-        (pdgemr2d_wrap(j, 1, z, 0, 0, T, 0, j));
-        (pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc));
+        // (pdgemr2d_wrap(m, 1, y, 0, 0, Y, 0, j));
+        measure_time(pdgemr2d_wrap(j, 1, z, 0, 0, T, 0, j));
+        measure_time(pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc));
         // val=3.14;
-        (set(T, j, j, val));
+        measure_time(set(T, j, j, val));
     }
-    free_matrix(tmp);
-    free_matrix(z);
-    free_matrix(y);
-    free_matrix(Y);
-    free(tau);
+    measure_time(
+        free_matrix(tmp);
+        free_matrix(z);
+        free_matrix(y);
+        free_matrix(Y);
+        free(tau););
 }
 
 void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Matrix *T, Matrix *Y)
@@ -286,143 +298,64 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
     assert(ldt_iter >= nb);
     assert(N % L == 0);
     Matrix *T_iter = create_matrix(nproc_row, nproc_col, L, L, block_col, block_row);
+    Matrix *V = create_matrix(nproc_row, nproc_col, N - L, L, block_row, block_col);
+    Matrix *update_tmp = create_matrix(nproc_row, nproc_col, N - L, N - L, block_row, block_col);
+    Matrix *update_P = create_matrix(nproc_row, nproc_col, N - L, L, block_row, block_col);
+    Matrix *update_beta = create_matrix(nproc_row, nproc_col, L, L, block_row, block_col);
+    Matrix *update_Q = create_matrix(nproc_row, nproc_col, N - L, L, block_row, block_col);
+
     for (int k = 0; k < N / L - 1; k++)
     {
-        // print_matrix("A = ", N, N, A, lda);
         //  rprintf("iteration %d/%d\n", k + 1, N / L - 1);
         int Nk = N - L - k * L;
         // Aの(k+1,k)ブロック以下をQR分解する
-        // rprintf("check 1\n");
         measure_time(pdgeqrt_wrap(rank, nproc_row, nproc_col, Nk, L, A, (k + 1) * L, k * L, T_iter));
-        // print_matrix("A=", A, rank);
+        measure_time(pdlaset_wrap('L', L, L, 0.0, 0.0, T, 0, L * k));
 
-        ////////////////////////////////!!!!!!!!!!!!!
-        blacs_barrier_(&icontext, ADDR(char, 'A'));
-
-        // print_matrix("T iter = ", L, L, T_iter, ldt_iter);
-        // TにT_iterを代入
-        // print_matrix("T iter = ", L, L, T_iter, ldt_iter);
-        // rprintf("check 2\n");
-
-        pdlaset_wrap('L', L, L, 0.0, 0.0, T, 0, L * k);
-        // for (int i = 0; i < L; i++)
-        // {
-        //     for (int j = 0; j < L; j++)
-        //     {
-        //         if (j >= i)
-        //         {
-        //             set(T, i, j + L * k, get(T_iter, i, j));
-        //         }
-        //         else
-        //         {
-        //             set(T_iter, i, j, 0.0);
-        //         }
-        //     }
-        // };
-        // print_matrix("T = ", L, N, T, ldt);
-
-        // Aを更新する
-        // rprintf("check 3\n");
-
-        Matrix *V = create_matrix(nproc_row, nproc_col, Nk, L, block_row, block_col);
-        Matrix *update_tmp = create_matrix(nproc_row, nproc_col, Nk, Nk, block_row, block_col);
-        Matrix *update_P = create_matrix(nproc_row, nproc_col, Nk, L, block_row, block_col);
-        Matrix *update_beta = create_matrix(nproc_row, nproc_col, L, L, block_row, block_col);
-        Matrix *update_Q = create_matrix(nproc_row, nproc_col, Nk, L, block_row, block_col);
-        // rprintf("check 4\n");
-
+        // print_matrix("A part = ", Nk, L, a_part, lda);
         int pad_row = (k + 1) * L;
         int pad_col = k * L;
-        // print_matrix("A part = ", Nk, L, a_part, lda);
 
         // VにA_partの下三角部分を代入する(LAPACKE_dgeqrtを実行しているので，a_partの下三角部分にはQのcompact-WY表現の一部が入っている)
-        pdgemr2d_wrap(Nk, L, A, pad_row, pad_col, V, 0, 0);
-        pdlaset_wrap('U', Nk, L, 0.0, 1.0, V, 0, 0);
-        // for (int i = 0; i < L; i++)
-        // {
-        //     for (int j = 0; j < L; j++)
-        //     {
-        //         if (i < j)
-        //         {
-        //             set(V, i, j, 0.0);
-        //         }
-        //         else if (i == j)
-        //         {
-        //             set(V, i, j, 1.0);
-        //         }
-        //     }
-        // }
-        // for (int i = 0; i < Nk; i++)
-        // {
-        //     for (int j = 0; j < L; j++)
-        //     {
-        //         if (i == j)
-        //         {
-        //             set(V, i, j, 1.0);
-        //         }
-        //         else if (i > j)
-        //         {
-        //             set(V, i, j, get(A, pad_row + i, pad_col + j));
-        //             // set(A, pad_row + i, pad_col + j, 0.0);
-        //         }
-        //         else
-        //         {
-        //             set(V, i, j, 0.0);
-        //         }
-        //     }
-        // };
-        // pdgemr2d_wrap(Nk, L, update_P, 0, 0, update_Q, 0, 0);
-
-        // rprintf("check 5\n");
-
+        measure_time(pdgemr2d_wrap(Nk, L, A, pad_row, pad_col, V, 0, 0));
+        measure_time(pdlaset_wrap('U', Nk, L, 0.0, 1.0, V, 0, 0));
         // print_matrix("V = ", Nk, L, V, Nk);
 
         // YにVを代入
-        pdgemr2d_wrap(Nk, L, V, 0, 0, Y, 0, L * k);
+        measure_time(pdgemr2d_wrap(Nk, L, V, 0, 0, Y, 0, L * k));
 
         // print_matrix("Y=", Y, rank);
 
-        // rprintf("check 6\n");
-        // rprintf("check 7\n");
-
         // 山本有作先生の『キャッシュマシン向け三重対角化アルゴリズムの性能予測方式』で説明されているBischofのアルゴリズム中のPを構築する
-        pdsymm_wrap('L', 'L', Nk, L, 1.0, A, (k + 1) * L, (k + 1) * L, V, 0, 0, 0.0, update_tmp, 0, 0);
+        measure_time(pdsymm_wrap('L', 'L', Nk, L, 1.0, A, (k + 1) * L, (k + 1) * L, V, 0, 0, 0.0, update_tmp, 0, 0));
         // print_matrix("T_iter", T_iter, rank);
 
-        pdgemm_wrap('N', 'N', Nk, L, L, 1.0, update_tmp, 0, 0, T_iter, 0, 0, 0.0, update_P, 0, 0);
+        measure_time(pdgemm_wrap('N', 'N', Nk, L, L, 1.0, update_tmp, 0, 0, T_iter, 0, 0, 0.0, update_P, 0, 0));
         // print_matrix("update_P", update_P, rank);
 
         // betaを構築する
-        pdgemm_wrap('T', 'N', L, L, Nk, 0.5, V, 0, 0, update_P, 0, 0, 0.0, update_tmp, 0, 0);
-        pdgemm_wrap('T', 'N', L, L, L, 1.0, T_iter, 0, 0, update_tmp, 0, 0, 0.0, update_beta, 0, 0);
+        measure_time(pdgemm_wrap('T', 'N', L, L, Nk, 0.5, V, 0, 0, update_P, 0, 0, 0.0, update_tmp, 0, 0));
+        measure_time(pdgemm_wrap('T', 'N', L, L, L, 1.0, T_iter, 0, 0, update_tmp, 0, 0, 0.0, update_beta, 0, 0));
         // print_matrix("update_P", update_beta, rank);
 
-        // rprintf("check 9\n");
-
         //  Qを構築する
-        pdgemr2d_wrap(Nk, L, update_P, 0, 0, update_Q, 0, 0);
-        // rprintf("check 10\n");
+        measure_time(pdgemr2d_wrap(Nk, L, update_P, 0, 0, update_Q, 0, 0));
         // print_matrix("update_Q=", update_Q, rank);
 
-        pdgemm_wrap('N', 'N', Nk, L, L, -1.0, V, 0, 0, update_beta, 0, 0, 1.0, update_Q, 0, 0);
+        measure_time(pdgemm_wrap('N', 'N', Nk, L, L, -1.0, V, 0, 0, update_beta, 0, 0, 1.0, update_Q, 0, 0));
         // print_matrix("update_Q", Nk, L, update_Q, Nk);
-        // rprintf("check 11\n");
 
         // Aをrank-2k更新する
         // print_matrix("V=", V, rank);
         // print_matrix("update_Q=", update_Q, rank);
 
-        pdsyr2k_wrap('L', 'N', Nk, L, -1.0, V, 0, 0, update_Q, 0, 0, 1.0, A, (k + 1) * L, (k + 1) * L);
-        // rprintf("check 12\n");
-        blacs_barrier_(&icontext, ADDR(char, 'A'));
-
-        free_matrix(V);
-        free_matrix(update_P);
-        free_matrix(update_beta);
-        free_matrix(update_Q);
-        free_matrix(update_tmp);
-        // rprintf("check 13\n");
+        measure_time(pdsyr2k_wrap('L', 'N', Nk, L, -1.0, V, 0, 0, update_Q, 0, 0, 1.0, A, (k + 1) * L, (k + 1) * L));
     }
+    free_matrix(V);
+    free_matrix(update_P);
+    free_matrix(update_beta);
+    free_matrix(update_Q);
+    free_matrix(update_tmp);
     free_matrix(T_iter);
 }
 
@@ -441,11 +374,11 @@ int main(int argc, char **argv)
     int m, n, k;
     m = atoi(argv[1]);
     // n = atoi(argv[2]);
-    block_row = 80;        // atoi(argv[3]);
+    block_row = 60;        // atoi(argv[3]);
     block_col = block_row; // atoi(argv[4]);
 
     int nproc, nproc_row, nproc_col, dims[2], ierror;
-    int L = 2;
+    int L = 32;
 
     blacs_pinfo_(&rank, &nproc);
     dims[0] = dims[1] = 0;
@@ -504,7 +437,7 @@ int main(int argc, char **argv)
     if (print_checkcode)
     {
         print_matrix("B=", A, rank);
-        rprintf("\nA = np.matrix(A)\nB = np.matrix(B)\n\nfor i, j in zip(np.linalg.eigvals(A), np.linalg.eigvals(B)):\n    print(i, j)\n");
+        rprintf("\nA = np.matrix(A)\nB = np.matrix(B)\ne=0\nfor i, j in zip(sorted(np.linalg.eigvals(A)), sorted(np.linalg.eigvals(B))):\n    print(i, j)\n    e+=(i-j)**2\n\nprint('error=',e**0.5)\n");
         print_matrix("T=", T, rank);
         print_matrix("Y=", Y, rank);
     }
