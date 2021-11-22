@@ -2,8 +2,8 @@
 // #include <mkl.h>
 #include <mpi.h>
 #include <omp.h> // for a timing routine.
-#include <stdio.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
@@ -21,19 +21,19 @@
                                                     \
     } while (0)
 
-#define measure_time(x)                                                                                              \
-    do                                                                                                               \
-    {                                                                                                                \
-        double start = omp_get_wtime();                                                                              \
-        {                                                                                                            \
-            x;                                                                                                       \
-        }                                                                                                            \
-        double end = omp_get_wtime();                                                                                \
-        if (print_checkcode == false)                                                                                \
-            rprintf("@ {\"rank\":%d, \"line\":%d, \"cmd\":\"%s\", \"time\":%f}\n", rank, __LINE__, #x, end - start); \
+#define measure_time(x)                                                                                                 \
+    do                                                                                                                  \
+    {                                                                                                                   \
+        double start = omp_get_wtime();                                                                                 \
+        {                                                                                                               \
+            x;                                                                                                          \
+        }                                                                                                               \
+        double end = omp_get_wtime();                                                                                   \
+        if (print_checkcode == false)                                                                                   \
+            rprintf("@ {\"rank\":%d, \"line\":%d, \"cmd\":\"%s\", \"time\":%.18f}\n", rank, __LINE__, #x, end - start); \
     } while (0)
 
-const int DESC_LEN = 9;
+const size_t DESC_LEN = 9;
 int block_row;
 int block_col;
 
@@ -47,11 +47,11 @@ typedef struct
 {
     double *data;
     int *desc;
-    int global_row;
-    int global_col;
-    int local_row;
-    int local_col;
-    int leading_dimension;
+    size_t global_row;
+    size_t global_col;
+    size_t local_row;
+    size_t local_col;
+    size_t leading_dimension;
 } Matrix;
 
 int min(int a, int b)
@@ -271,13 +271,13 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
         measure_time(pdgemv_wrap('T', m, j, 1.0, Y, 0, 0, y, 0, j, 1, 0.0, tmp, 0, 0, 1));
         measure_time(pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc));
         // printf("%lf ", val);
-        measure_time(pdgemv_wrap('N', j, j, -val, T, 0, 0, tmp, 0, 0, 1, 0.0, z, 0, 0, 1));
+        measure_time(pdgemv_wrap('N', j, j, -val, T, 0, 0, tmp, 0, 0, 1, 0.0, T, 0, j, 1));
         // measure_time(pdgemm_wrap('N', 'N', j, 1, j, -val, T, 0, 0, tmp, 0, 0, 0.0, z, 0, 0));
 
         // print_matrix("tmp=", tmp, rank);
         // print_matrix("z=", z, rank);
         // (pdgemr2d_wrap(m, 1, y, 0, 0, Y, 0, j));
-        measure_time(pdgemr2d_wrap(j, 1, z, 0, 0, T, 0, j));
+        // measure_time(pdgemr2d_wrap(j, 1, z, 0, 0, T, 0, j));
         measure_time(pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc));
         // val=3.14;
         measure_time(set(T, j, j, val));
@@ -359,6 +359,10 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
     free_matrix(T_iter);
 }
 
+void TSQR(int rank, int proc_row, int proc_col, int m, int n, Matrix *matrix, int row, int col, Matrix *T)
+{
+}
+
 int main(int argc, char **argv)
 {
     unsigned long const random_seed = 100;
@@ -399,7 +403,7 @@ int main(int argc, char **argv)
 
     measure_time(for (size_t i = 0; i < A->global_row; ++i)
                  {
-                     for (size_t j = 0; j < A->global_col; ++j)
+                     for (size_t j = i; j < A->global_col; ++j)
                      {
                          double r = (double)(rand()) / RAND_MAX;
                          set(A, i, j, r);
@@ -415,21 +419,24 @@ int main(int argc, char **argv)
     }
     //  measure_time(pdgeqrt_wrap(rank, nproc_row, nproc_col, m, n, A, 0, 0, T));
     measure_time(bischof(rank, nproc_row, nproc_col, m, L, A, T, Y));
-    for (int i = 0; i < m; i++)
+    if (print_checkcode)
     {
-        for (int j = i; j < m; j++)
+        for (int i = 0; i < m; i++)
         {
-            set(A, i, j, get(A, j, i));
-        }
-    }
-
-    for (int i = 0; i < m; i++)
-    {
-        for (int j = 0; j < m; j++)
-        {
-            if (abs(i - j) > L)
+            for (int j = i; j < m; j++)
             {
-                set(A, i, j, 0.0);
+                set(A, i, j, get(A, j, i));
+            }
+        }
+
+        for (int i = 0; i < m; i++)
+        {
+            for (int j = 0; j < m; j++)
+            {
+                if (abs(i - j) > L)
+                {
+                    set(A, i, j, 0.0);
+                }
             }
         }
     }

@@ -7,3 +7,4 @@ B*.o*
 B*.e*
 run/*.txt
 *.out
+check.py
