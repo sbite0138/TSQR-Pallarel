@@ -2,11 +2,13 @@
 // #include <mkl.h>
 #include <mpi.h>
 #include <omp.h> // for a timing routine.
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
+
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define ADDR(t, v) \
     &(t) { v }
@@ -15,7 +17,7 @@
     {                                               \
         if (rank == 0)                              \
         {                                           \
-            printf(__VA_ARGS__);                    \
+            sbprintf(__VA_ARGS__);                    \
         }                                           \
         blacs_barrier_(&icontext, ADDR(char, 'A')); \
                                                     \
@@ -33,6 +35,42 @@
             rprintf("@ {\"rank\":%d, \"line\":%d, \"cmd\":\"%s\", \"time\":%.18f}\n", rank, __LINE__, #x, end - start); \
     } while (0)
 
+typedef struct StringBuffer
+{
+    char *buf;
+    size_t size;
+    size_t next;
+} StringBuffer;
+StringBuffer sBuffer;
+
+void initBuffer()
+{
+    StringBuffer *sb = &sBuffer;
+    sb->size = 65536;
+    sb->buf = (char *)malloc(sb->size * sizeof(char));
+    sb->next = 0;
+}
+
+void sbprintf(const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+
+    sBuffer.next += vsprintf(&sBuffer.buf[sBuffer.next], fmt, args);
+    va_end(args);
+    if (sBuffer.next > 8 * sBuffer.size / 10)
+    {
+        sBuffer.size *= 2;
+        sBuffer.buf = realloc(sBuffer.buf, sBuffer.size * sizeof(char));
+        fprintf(stderr, "realloced!\n");
+    }
+}
+void dumpBuffer()
+{
+    sBuffer.buf[sBuffer.next++] = '\0';
+    puts(sBuffer.buf);
+}
+
 const size_t DESC_LEN = 9;
 int block_row;
 int block_col;
@@ -41,7 +79,7 @@ int my_row;
 int my_col;
 int icontext;
 int rank;
-bool print_checkcode = false;
+bool print_checkcode = true;
 
 typedef struct
 {
@@ -374,7 +412,7 @@ int main(int argc, char **argv)
         printf("Usage %s matrix_size\n", argv[0]);
         return 0;
     }
-
+    initBuffer();
     int m, n, k;
     m = atoi(argv[1]);
     // n = atoi(argv[2]);
@@ -458,5 +496,7 @@ int main(int argc, char **argv)
     free_matrix(Y);
 
     MPI_Finalize();
+    if (rank == 0)
+        dumpBuffer();
     return 0;
 }
