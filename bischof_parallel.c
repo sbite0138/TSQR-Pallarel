@@ -17,7 +17,7 @@
     {                                               \
         if (rank == 0)                              \
         {                                           \
-            sbprintf(__VA_ARGS__);                    \
+            sbprintf(__VA_ARGS__);                  \
         }                                           \
         blacs_barrier_(&icontext, ADDR(char, 'A')); \
                                                     \
@@ -403,9 +403,6 @@ void TSQR(int rank, int proc_row, int proc_col, int m, int n, Matrix *matrix, in
 
 int main(int argc, char **argv)
 {
-    unsigned long const random_seed = 100;
-    srand(random_seed);
-
     MPI_Init(&argc, &argv);
     if (argc != 2)
     {
@@ -418,6 +415,8 @@ int main(int argc, char **argv)
     // n = atoi(argv[2]);
     block_row = 60;        // atoi(argv[3]);
     block_col = block_row; // atoi(argv[4]);
+    unsigned long const random_seed = 100;
+    srand(random_seed);
 
     int nproc, nproc_row, nproc_col, dims[2], ierror;
     int L = 32;
