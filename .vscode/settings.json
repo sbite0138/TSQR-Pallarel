@@ -16,6 +16,16 @@
         "functional": "c",
         "tuple": "c",
         "utility": "c",
-        "variant": "c"
+        "variant": "c",
+        "bitset": "c",
+        "fstream": "c",
+        "iomanip": "c",
+        "limits": "c",
+        "mutex": "c",
+        "ostream": "c",
+        "numeric": "c",
+        "sstream": "c",
+        "streambuf": "c",
+        "thread": "c"
     }
 }

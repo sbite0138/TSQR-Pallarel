@@ -8,11 +8,11 @@ endif
 endif
 OPENBLAS_DIR = ./OpenBLAS-0.3.13
 
-all: TSQR_test bischof qrprec parallel
+all: tsqr_test bischof qrprec parallel
 
 
-TSQR_test: code.c
-	$(CC) -isystem $(OPENBLAS_DIR)/lapack-netlib/LAPACKE/include $< -L$(OPENBLAS_DIR)/lib -lopenblas -lm -o $@
+tsqr_test: tsqr_test.c
+	mpicc $< -L'/home/sbite/github/scalapack-2.1.0/lib' -lscalapack -llapack -lgfortran  -fopenmp  -g -std=c11  -o $@
 
 bischof: bischof.c
 	$(CC) -isystem $(OPENBLAS_DIR)/lapack-netlib/LAPACKE/include $< -L$(OPENBLAS_DIR)/lib -lopenblas -lm -o $@
@@ -22,6 +22,7 @@ qrprec: qrprec.c
 
 parallel: bischof_parallel.c
 	 mpicc bischof_parallel.c -L'/home/sbite/github/scalapack-2.1.0/lib' -lscalapack -llapack -lgfortran  -fopenmp  -g -std=c11  -o $@
+
 
 clean:
 	rm -f qrprec
