@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
+#include <cblas.h>
+#include <lapacke.h>
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define ADDR(t, v) \
@@ -506,6 +508,12 @@ void TSQR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *matr
             printf("\n");
         }
         blacs_barrier_(&icontext, ADDR(char, 'A'));
+    }
+    double *tau = malloc(n * sizeof(double));
+    LAPACKE_dgeqrf(LAPACK_COL_MAJOR, m / proc_num, n, data, m / proc_num, tau);
+    int num = proc_num;
+    while (num > 1)
+    {
     }
 }
 
