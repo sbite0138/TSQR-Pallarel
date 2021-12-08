@@ -427,7 +427,6 @@ void TSQR_init(int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, i
 
     int m_part = m / proc_num;
     int n_part = n;
-    printf("n = %d", n);
     Matrix matrixes[proc_num];
     // printf("\n%d\n", proc_num);
 
@@ -472,7 +471,7 @@ void TSQR_init(int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, i
 
             assert(ierror == 0);
             pdgemr2d_wrap(matrixes[current_grid_pos].global_row, matrixes[current_grid_pos].global_col, matrix, row + matrixes[current_grid_pos].global_row * cnt, col, &(matrixes[current_grid_pos]), 0, 0);
-            if (my_grid_pos == current_grid_pos)
+            if (false) //(my_grid_pos == current_grid_pos)
             {
                 printf("desc %d\n", matrixes[current_grid_pos].desc[0]);
                 printf("desc %d\n", matrixes[current_grid_pos].desc[1]);
@@ -497,23 +496,23 @@ void TSQR_init(int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, i
 void TSQR(int id, int m, int n, double **data, double **Y, size_t **Y_heads, double **R, double **tau)
 {
     blacs_barrier_(&icontext, ADDR(char, 'A'));
-    for (int k = 0; k < proc_num; k++)
-    {
-        if (k == id)
-        {
-            for (int i = 0; i < m / proc_num; i++)
-            {
-                for (int j = 0; j < n; j++)
-                {
-                    printf("%lf ", (*data)[j * (m / proc_num) + i]);
-                    // printf("%d ", j * m / proc_num + i);
-                }
-                printf("\n");
-            }
-            printf("\n");
-        }
-        blacs_barrier_(&icontext, ADDR(char, 'A'));
-    }
+    // for (int k = 0; k < proc_num; k++)
+    // {
+    //     if (k == id)
+    //     {
+    //         for (int i = 0; i < m / proc_num; i++)
+    //         {
+    //             for (int j = 0; j < n; j++)
+    //             {
+    //                 printf("%lf ", (*data)[j * (m / proc_num) + i]);
+    //                 // printf("%d ", j * m / proc_num + i);
+    //             }
+    //             printf("\n");
+    //         }
+    //         printf("\n");
+    //     }
+    //     blacs_barrier_(&icontext, ADDR(char, 'A'));
+    // }
     int m_part = m / proc_num;
     int n_part = n;
     assert(m_part >= n_part);
@@ -529,14 +528,14 @@ void TSQR(int id, int m, int n, double **data, double **Y, size_t **Y_heads, dou
     int current_blocknum = 1;
     LAPACKE_dgeqrf(LAPACK_COL_MAJOR, m_part, n_part, *data, m_part, *tau);
     LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, *data, m_part, *R, n_part);
-    LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'L', n_part, n_part, *data, m_part, *Y, m_part);
+    LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'L', m_part, n_part, *data, m_part, *Y, m_part);
     LAPACKE_dlaset(LAPACK_COL_MAJOR, 'U', m_part, n_part, 0.0, 1.0, *Y, m_part);
     int k = 1;
     int i = id;
     int p = proc_num;
     while ((1 << k) <= proc_num)
     {
-        printf("%d\n", k);
+        // printf("%d\n", k);
         if (i % (1 << k) == 0 && (i + (1 << (k - 1))) < p)
         {
             int j = i + (1 << (k - 1));
@@ -545,7 +544,7 @@ void TSQR(int id, int m, int n, double **data, double **Y, size_t **Y_heads, dou
             MPI_Status st;
             int ret = MPI_Recv(R_rsv, n_part * n_part, MPI_DOUBLE, j, 0, MPI_COMM_WORLD, &st);
             assert(ret == MPI_SUCCESS);
-            printf("[%d] recv from %d\n", i, j);
+            // printf("[%d] recv from %d\n", i, j);
             //  write to Y
 
             *Y = realloc(*Y, (Y_size + n_part * n_part + n_part * n_part) * sizeof(double));
@@ -556,7 +555,9 @@ void TSQR(int id, int m, int n, double **data, double **Y, size_t **Y_heads, dou
             // write to R
             LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, *R, n_part, &((*Y)[Y_size]), 2 * n_part);
             LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, R_rsv, n_part, &((*Y)[Y_size + n_part]), 2 * n_part);
-            LAPACKE_dgeqrf(LAPACK_COL_MAJOR, 2 * n_part, n_part, &((*Y)[Y_size]), 2 * n_part, &((*tau)[tau_size]));
+
+            ret = LAPACKE_dgeqrf(LAPACK_COL_MAJOR, 2 * n_part, n_part, &((*Y)[Y_size]), 2 * n_part, &((*tau)[tau_size]));
+            // printf("ret = %d\n", ret);
             LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, &((*Y)[Y_size]), 2 * n_part, *R, n_part);
             Y_size += n_part * n_part * 2;
             tau_size += n_part;
@@ -567,27 +568,26 @@ void TSQR(int id, int m, int n, double **data, double **Y, size_t **Y_heads, dou
         {
             int ret = MPI_Send(*R, n_part * n_part, MPI_DOUBLE, i - (1 << (k - 1)), 0, MPI_COMM_WORLD);
             assert(ret == MPI_SUCCESS);
-            printf("[%d] send to %d\n", i, (1 << (k - 1)));
+            // printf("[%d] send to %d\n", i, (1 << (k - 1)));
         }
 
         k++;
     }
-    printf("done\n");
     append(*Y_heads, Y_heads_size, Y_size);
 
     blacs_barrier_(&icontext, ADDR(char, 'A'));
 
-    if (id == 0)
-    {
-        for (int i = 0; i < n_part; i++)
-        {
-            for (int j = 0; j < n_part; j++)
-            {
-                printf("%lf ", (*R)[i * n_part + j]);
-            }
-            printf("\n");
-        }
-    }
+    // if (id == -1)
+    // {
+    //     for (int i = 0; i < n_part; i++)
+    //     {
+    //         for (int j = 0; j < n_part; j++)
+    //         {
+    //             printf("%lf ", (*R)[i * n_part + j]);
+    //         }
+    //         printf("\n");
+    //     }
+    // }
 }
 
 void construct_TSQR_Q(int id, int m, int n, double *Y, size_t *Y_heads, double *tau, double **Q_ret)
@@ -598,15 +598,16 @@ void construct_TSQR_Q(int id, int m, int n, double *Y, size_t *Y_heads, double *
     int k = 0;
     int p = proc_num;
     int i = id;
-    double *Q;
+    double *Q = NULL;
     int Q_dim[2];
+    Q_dim[0] = Q_dim[1] = 0;
     if (i == 0)
     {
         Q_dim[0] = n_part;
         Q_dim[1] = n_part;
 
         Q = malloc(Q_dim[0] * Q_dim[1] * sizeof(double));
-        LAPACKE_dlaset(LAPACK_COL_MAJOR, 'A', n_part, n_part, 0.0, 1.0, Y, m_part);
+        LAPACKE_dlaset(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], 0.0, 1.0, Q, Q_dim[0]);
     }
     while ((1 << k) < p)
     {
@@ -614,22 +615,83 @@ void construct_TSQR_Q(int id, int m, int n, double *Y, size_t *Y_heads, double *
     }
     while (k >= 1)
     {
+
         if (i % (1 << k) == 0 && i + (1 << (k - 1)) < p)
         {
-            size_t m_Y = Y_heads[k] - Y_heads[k - 1];
-            printf("%d %d\n", m_Y, n_part);
+            size_t m_Y = Y_heads[k + 1] - Y_heads[k];
             assert(m_Y % n_part == 0);
             m_Y /= n_part;
-            // impl me!:
-            /*
             assert(Q_dim[0] <= m_Y);
             double *Q_tmp = calloc(m_Y * n_part, sizeof(double));
+            LAPACKE_dlaset(LAPACK_COL_MAJOR, 'A', m_Y, n_part, 0.0, 0.0, Q_tmp, m_Y);
             LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], Q, Q_dim[0], Q_tmp, m_Y);
-            LAPACKE_dormqr(LAPACK_COL_MAJOR, 'L', 'N', m_Y, n_part, n_part, &Y[Y_heads[k - 1]], m_Y, &tau[n_part * (k - 1)], Q_tmp, m_Y);
-            */
+            LAPACKE_dormqr(LAPACK_COL_MAJOR, 'L', 'N', m_Y, n_part, n_part, &Y[Y_heads[k]], m_Y, &tau[n_part * (k)], Q_tmp, m_Y);
+            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], Q_tmp, m_Y, Q, Q_dim[0]);
+            int Q_send_dim[2];
+            Q_send_dim[0] = m_Y - Q_dim[0];
+            Q_send_dim[1] = Q_dim[1];
+            int ret = MPI_Send(Q_send_dim, 2, MPI_INT, i + (1 << (k - 1)), 0, MPI_COMM_WORLD);
+            assert(ret == MPI_SUCCESS);
+            double *Q_send = calloc(Q_send_dim[0] * Q_send_dim[1], sizeof(double));
+            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_send_dim[0], Q_send_dim[1], &Q_tmp[Q_dim[0]], m_Y, Q_send, Q_send_dim[0]);
+
+            ret = MPI_Send(Q_send, Q_send_dim[0] * Q_send_dim[1], MPI_DOUBLE, i + (1 << (k - 1)), 0, MPI_COMM_WORLD);
+
+            assert(ret == MPI_SUCCESS);
+            free(Q_tmp);
+            free(Q_send);
+        }
+        else if (i % (1 << k) == (1 << (k - 1)))
+        {
+            MPI_Status st;
+            int ret = MPI_Recv(Q_dim, 2, MPI_INT, i - (1 << (k - 1)), 0, MPI_COMM_WORLD, &st);
+            assert(ret == MPI_SUCCESS);
+
+            Q = realloc(Q, Q_dim[0] * Q_dim[1] * sizeof(double));
+
+            ret = MPI_Recv(Q, Q_dim[0] * Q_dim[1], MPI_DOUBLE, i - (1 << (k - 1)), 0, MPI_COMM_WORLD, &st);
+            assert(ret == MPI_SUCCESS);
         }
         k--;
     }
+    size_t m_Y = Y_heads[1] - Y_heads[0];
+    assert(m_Y % n_part == 0);
+    m_Y /= n_part;
+
+    double *Q_tmp = calloc(m_Y * n_part, sizeof(double));
+    LAPACKE_dlaset(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], 0.0, 0.0, Q_tmp, m_Y);
+    // printf("------------------------------------\n");
+    // printf("[\n");
+    // for (int row = 0; row < Q_dim[0]; row++)
+    // {
+    //     printf("[");
+    //     for (int col = 0; col < Q_dim[1]; col++)
+    //     {
+    //         printf("%lf, ", Q[col * Q_dim[0] + row]);
+    //     }
+    //     printf("],\n");
+    // }
+    // printf("]");
+
+    LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], Q, Q_dim[0], Q_tmp, m_Y);
+    // printf("------------------------------------\n");
+    // printf("[\n");
+    // for (int row = 0; row < m_Y; row++)
+    // {
+    //     printf("[");
+    //     for (int col = 0; col < n_part; col++)
+    //     {
+    //         printf("%lf, ", Q_tmp[col * m_Y + row]);
+    //     }
+    //     printf("],\n");
+    // }
+    // printf("]");
+    LAPACKE_dormqr(LAPACK_COL_MAJOR, 'L', 'N', m_Y, n_part, n_part, &Y[Y_heads[0]], m_Y, &tau[0], Q_tmp, m_Y);
+
+    free(Q);
+    *Q_ret = Q_tmp;
+    return;
+    // LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], Q_tmp, m_Y, Q, Q_dim[0]);
 }
 
 void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A, int row, int col, Matrix *T)
@@ -641,8 +703,44 @@ void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A
     double *Y, *R, *tau;
     size_t *Y_heads;
     TSQR(id, m, n, &data, &Y, &Y_heads, &R, &tau);
+    int m_part = m / proc_num;
+    int n_part = n;
+    if (id == 0)
+    {
+        printf("R=[\n");
+        for (int row = 0; row < n_part; row++)
+        {
+            printf("[");
+            for (int col = 0; col < n_part; col++)
+            {
+                printf("%lf, ", R[col * n_part + row]);
+            }
+            printf("],\n");
+        }
+        printf("]\n");
+    }
     double *Q;
-    construct_TSQR_Q(id, m, n, Y, Y_heads, tau, Q);
+    construct_TSQR_Q(id, m, n, Y, Y_heads, tau, &Q);
+    if (id == 0)
+        printf("Q=[\n");
+    for (int p = 0; p < proc_num; p++)
+    {
+        if (p == id)
+        {
+            for (int i = 0; i < m / proc_num; i++)
+            {
+                printf("[");
+                for (int j = 0; j < n; j++)
+                {
+                    printf("%lf ,", Q[j * m / proc_num + i]);
+                }
+                printf("],\n");
+            }
+        }
+        blacs_barrier_(&icontext, ADDR(char, 'A'));
+    }
+    if (id == 0)
+        printf("]\n");
 }
 
 int main(int argc, char **argv)
@@ -654,9 +752,7 @@ int main(int argc, char **argv)
         printf("Usage %s matrix_size\n", argv[0]);
         return 0;
     }
-    printf("do nothing");
     initBuffer();
-    printf("\n");
     int m, n, k;
     m = atoi(argv[1]);
     // n = atoi(argv[2]);
@@ -681,23 +777,23 @@ int main(int argc, char **argv)
     blacs_gridinfo_(&icontext, &proc_row_num, &proc_col_num, &my_row, &my_col);
     n = 4;
     // main calc
-    printf("%d %d", m, n);
+    // printf("%d %d", m, n);
 
     Matrix *A = create_matrix(proc_row_num, proc_col_num, m, n, block_row, block_col);
     Matrix *T = create_matrix(proc_row_num, proc_col_num, n, n, block_row, block_col);
 
-    measure_time(for (size_t i = 0; i < A->global_row; ++i) {
-        for (size_t j = 0; j < A->global_col; ++j)
-        {
-            // double r = i * A->global_col + j;
-            double r = (double)(rand()) / RAND_MAX;
-            set(A, i, j, r);
-            // set(A, j, i, r);
-        }
-    });
+    measure_time(for (size_t i = 0; i < A->global_row; ++i)
+                 {
+                     for (size_t j = 0; j < A->global_col; ++j)
+                     {
+                         // double r = i * A->global_col + j;
+                         double r = (double)(rand()) / RAND_MAX;
+                         set(A, i, j, r);
+                         // set(A, j, i, r);
+                     }
+                 });
     blacs_barrier_(&icontext, ADDR(char, 'A'));
     print_matrix("A=", A, rank);
-    printf("start\n");
     TSQR_HR(rank, my_row, my_col, m, n, A, 0, 0, T);
     free_matrix(A);
 
