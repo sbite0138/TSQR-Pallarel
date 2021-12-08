@@ -36,6 +36,13 @@
         if (print_checkcode == false)                                                                                   \
             rprintf("@ {\"rank\":%d, \"line\":%d, \"cmd\":\"%s\", \"time\":%.18f}\n", rank, __LINE__, #x, end - start); \
     } while (0)
+#define append(vec, vec_size, val)                           \
+    do                                                       \
+    {                                                        \
+        vec = realloc(vec, (vec_size + 1) * sizeof(size_t)); \
+        vec[vec_size] = val;                                 \
+        vec_size++;                                          \
+    } while (false)
 
 typedef struct StringBuffer
 {
@@ -486,7 +493,7 @@ void TSQR_init(int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, i
     }
 }
 
-void TSQR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, int row, int col, Matrix *T)
+void TSQR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, int row, int col, Matrix *T, double *Y, size_t *Y_heads, double *R, double *tau)
 {
     int id;
     double *data;
@@ -511,32 +518,50 @@ void TSQR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *matr
     }
     int m_part = m / proc_num;
     int n_part = n;
-    double *tau = malloc(n * sizeof(double));
-    double *R = calloc(n_part * n_part, sizeof(double));
+    assert(m_part >= n_part);
+    tau = malloc(n * sizeof(double));
+    size_t tau_size = n_part;
+    R = calloc(n_part * n_part, sizeof(double));
+    Y = calloc(m_part * n_part, sizeof(double));
+    size_t Y_heads_size = 0;
+    Y_heads = NULL;
+    append(Y_heads, Y_heads_size, 0);
+    size_t Y_size = m_part * n_part;
+
     int current_blocknum = 1;
     LAPACKE_dgeqrf(LAPACK_COL_MAJOR, m_part, n_part, data, m_part, tau);
     LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, data, m_part, R, n_part);
+    LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'L', n_part, n_part, data, m_part, Y, m_part);
+    LAPACKE_dlaset(LAPACK_COL_MAJOR, 'U', m_part, n_part, 0.0, 1.0, Y, m_part);
     int k = 1;
     int i = id;
     int p = proc_num;
-    while ((1 << k) < proc_num)
+    while ((1 << k) <= proc_num)
     {
         printf("%d\n", k);
         if (i % (1 << k) == 0 && (i + (1 << (k - 1))) < p)
         {
             int j = i + (1 << (k - 1));
-            printf("[%d] send to %d\n", i, j);
+            printf("[%d] recv from %d\n", i, j);
             double *R_tmp = calloc(2 * n_part * n_part, sizeof(double));
-            double *R_rcv = calloc(n_part * n_part, sizeof(double));
+            double *R_rsv = calloc(n_part * n_part, sizeof(double));
             MPI_Status st;
-            int ret = MPI_Recv(R_rcv, n_part * n_part, MPI_DOUBLE, j, 0, MPI_COMM_WORLD, &st);
+            int ret = MPI_Recv(R_rsv, n_part * n_part, MPI_DOUBLE, j, 0, MPI_COMM_WORLD, &st);
             assert(ret == MPI_SUCCESS);
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, R, n_part, R_tmp, 2 * n_part);
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, R_rcv, n_part, &R_tmp[n_part], 2 * n_part);
-            LAPACKE_dgeqrf(LAPACK_COL_MAJOR, 2 * n_part, n_part, R_tmp, 2 * n_part, tau);
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, R_tmp, 2 * n_part, R, n_part);
+            // write to Y
+            Y = realloc(Y, (Y_size + n_part * n_part + n_part * n_part) * sizeof(double));
+            append(Y_heads, Y_heads_size, Y_size);
+
+            tau = realloc(tau, (tau_size + n_part) * sizeof(double));
+            // write to R
+            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, R, n_part, &Y[Y_size], 2 * n_part);
+            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, R_rsv, n_part, &Y[Y_size + n_part], 2 * n_part);
+            LAPACKE_dgeqrf(LAPACK_COL_MAJOR, 2 * n_part, n_part, &Y[Y_size], 2 * n_part, &tau[tau_size]);
+            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, &Y[Y_size], 2 * n_part, R, n_part);
+            Y_size += n_part * n_part * 2;
+            tau_size += n_part;
             free(R_tmp);
-            free(R_rcv);
+            free(R_rsv);
         }
         else if (i % (1 << k) == (1 << (k - 1)))
         {
@@ -546,8 +571,9 @@ void TSQR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *matr
         }
 
         k++;
-        blacs_barrier_(&icontext, ADDR(char, 'A'));
     }
+    blacs_barrier_(&icontext, ADDR(char, 'A'));
+
     if (id == 0)
     {
         for (int i = 0; i < n_part; i++)
@@ -559,6 +585,18 @@ void TSQR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *matr
             printf("\n");
         }
     }
+}
+
+void construct_TSQR_Q(double *Y, double *tau, double *Q)
+{
+}
+
+void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A, int row, int col, Matrix *T)
+{
+    double *Y, *R, *tau;
+    size_t *Y_heads;
+    TSQR(rank, my_row, my_col, m, n, A, 0, 0, T, Y, Y_heads, R, tau);
+    double *Q;
 }
 
 int main(int argc, char **argv)
@@ -595,7 +633,7 @@ int main(int argc, char **argv)
     blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext);
     blacs_gridinit_(&icontext, ADDR(char, 'R'), &proc_row_num, &proc_col_num);
     blacs_gridinfo_(&icontext, &proc_row_num, &proc_col_num, &my_row, &my_col);
-    n = 10;
+    n = 4;
     // main calc
     printf("%d %d", m, n);
 
@@ -614,7 +652,7 @@ int main(int argc, char **argv)
     blacs_barrier_(&icontext, ADDR(char, 'A'));
     print_matrix("A=", A, rank);
     printf("start\n");
-    TSQR(rank, my_row, my_col, m, n, A, 0, 0, T);
+    TSQR_HR(rank, my_row, my_col, m, n, A, 0, 0, T);
     free_matrix(A);
 
     MPI_Finalize();
