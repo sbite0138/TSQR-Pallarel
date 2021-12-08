@@ -12,7 +12,7 @@ all: tsqr_test bischof qrprec parallel
 
 
 tsqr_test: tsqr_test.c
-	mpicc $< -isystem $(OPENBLAS_DIR)/lapack-netlib/LAPACKE/include -L$(OPENBLAS_DIR)/lib  -lopenblas -lm -L'/home/sbite/github/scalapack-2.1.0/lib' -lscalapack -llapack -lgfortran  -fopenmp  -g -std=c11  -o $@
+	mpicc  $< -lm -L'/home/sbite/github/scalapack-2.1.0/lib' -lscalapack -llapacke -llapack -lgfortran -g -fopenmp  -std=c11  -o $@
 
 bischof: bischof.c
 	$(CC) -isystem $(OPENBLAS_DIR)/lapack-netlib/LAPACKE/include $< -L$(OPENBLAS_DIR)/lib -lopenblas -lm -o $@

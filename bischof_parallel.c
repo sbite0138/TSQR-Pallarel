@@ -480,6 +480,7 @@ int main(int argc, char **argv)
         }
     }
     blacs_barrier_(&icontext, ADDR(char, 'A'));
+
     if (print_checkcode)
     {
         print_matrix("B=", A, rank);

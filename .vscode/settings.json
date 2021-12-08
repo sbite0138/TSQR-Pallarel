@@ -26,6 +26,9 @@
         "numeric": "c",
         "sstream": "c",
         "streambuf": "c",
-        "thread": "c"
+        "thread": "c",
+        "cblas.h": "c",
+        "openblas_config.h": "c",
+        "lapacke.h": "c"
     }
 }

@@ -1,5 +1,7 @@
 #include <assert.h>
 // #include <mkl.h>
+#include <cblas.h>
+#include <lapacke.h>
 #include <mpi.h>
 #include <omp.h> // for a timing routine.
 #include <stdarg.h>
@@ -8,8 +10,6 @@
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
-#include <cblas.h>
-#include <lapacke.h>
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define ADDR(t, v) \
@@ -509,17 +509,60 @@ void TSQR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *matr
         }
         blacs_barrier_(&icontext, ADDR(char, 'A'));
     }
+    int m_part = m / proc_num;
+    int n_part = n;
     double *tau = malloc(n * sizeof(double));
-    LAPACKE_dgeqrf(LAPACK_COL_MAJOR, m / proc_num, n, data, m / proc_num, tau);
-    int num = proc_num;
-    while (num > 1)
+    double *R = calloc(n_part * n_part, sizeof(double));
+    int current_blocknum = 1;
+    LAPACKE_dgeqrf(LAPACK_COL_MAJOR, m_part, n_part, data, m_part, tau);
+    LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, data, m_part, R, n_part);
+    int k = 1;
+    int i = id;
+    int p = proc_num;
+    while ((1 << k) < proc_num)
     {
+        printf("%d\n", k);
+        if (i % (1 << k) == 0 && (i + (1 << (k - 1))) < p)
+        {
+            int j = i + (1 << (k - 1));
+            printf("[%d] send to %d\n", i, j);
+            double *R_tmp = calloc(2 * n_part * n_part, sizeof(double));
+            double *R_rcv = calloc(n_part * n_part, sizeof(double));
+            MPI_Status st;
+            int ret = MPI_Recv(R_rcv, n_part * n_part, MPI_DOUBLE, j, 0, MPI_COMM_WORLD, &st);
+            assert(ret == MPI_SUCCESS);
+            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, R, n_part, R_tmp, 2 * n_part);
+            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, R_rcv, n_part, &R_tmp[n_part], 2 * n_part);
+            LAPACKE_dgeqrf(LAPACK_COL_MAJOR, 2 * n_part, n_part, R_tmp, 2 * n_part, tau);
+            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, R_tmp, 2 * n_part, R, n_part);
+            free(R_tmp);
+            free(R_rcv);
+        }
+        else if (i % (1 << k) == (1 << (k - 1)))
+        {
+            printf("[%d] send to %d\n", i, (1 << (k - 1)));
+            int ret = MPI_Send(R, n_part * n_part, MPI_DOUBLE, i - (1 << (k - 1)), 0, MPI_COMM_WORLD);
+            assert(ret == MPI_SUCCESS);
+        }
+
+        k++;
+        blacs_barrier_(&icontext, ADDR(char, 'A'));
+    }
+    if (id == 0)
+    {
+        for (int i = 0; i < n_part; i++)
+        {
+            for (int j = 0; j < n_part; j++)
+            {
+                printf("%lf ", R[i * n_part + j]);
+            }
+            printf("\n");
+        }
     }
 }
 
 int main(int argc, char **argv)
 {
-
     // init
     MPI_Init(&argc, &argv);
     if (argc != 2)
@@ -527,6 +570,7 @@ int main(int argc, char **argv)
         printf("Usage %s matrix_size\n", argv[0]);
         return 0;
     }
+    printf("do nothing");
     initBuffer();
     printf("\n");
     int m, n, k;
@@ -553,19 +597,23 @@ int main(int argc, char **argv)
     blacs_gridinfo_(&icontext, &proc_row_num, &proc_col_num, &my_row, &my_col);
     n = 10;
     // main calc
+    printf("%d %d", m, n);
+
     Matrix *A = create_matrix(proc_row_num, proc_col_num, m, n, block_row, block_col);
     Matrix *T = create_matrix(proc_row_num, proc_col_num, n, n, block_row, block_col);
 
     measure_time(for (size_t i = 0; i < A->global_row; ++i) {
         for (size_t j = 0; j < A->global_col; ++j)
         {
-            double r = i * A->global_col + j; //(double)(rand()) / RAND_MAX;
+            // double r = i * A->global_col + j;
+            double r = (double)(rand()) / RAND_MAX;
             set(A, i, j, r);
             // set(A, j, i, r);
         }
     });
     blacs_barrier_(&icontext, ADDR(char, 'A'));
-    //     TSQR(rank, my_row, my_col, m, n, A, 0, 0);
+    print_matrix("A=", A, rank);
+    printf("start\n");
     TSQR(rank, my_row, my_col, m, n, A, 0, 0, T);
     free_matrix(A);
 
