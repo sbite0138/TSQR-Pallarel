@@ -493,11 +493,9 @@ void TSQR_init(int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, i
     }
 }
 
-void TSQR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, int row, int col, Matrix *T, double *Y, size_t *Y_heads, double *R, double *tau)
+// void TSQR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, int row, int col, Matrix *T, double *Y, size_t *Y_heads, double *R, double *tau)
+void TSQR(int id, int m, int n, double *data, double *Y, size_t *Y_heads, double *R, double *tau)
 {
-    int id;
-    double *data;
-    TSQR_init(proc_row_id, proc_col_id, m, n, matrix, row, col, &data, &id);
     blacs_barrier_(&icontext, ADDR(char, 'A'));
     for (int k = 0; k < proc_num; k++)
     {
@@ -587,15 +585,39 @@ void TSQR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *matr
     }
 }
 
-void construct_TSQR_Q(double *Y, double *tau, double *Q)
+void construct_TSQR_Q(int id, int m, int n, double *Y, size_t *Y_heads, double *tau, double *Q)
 {
+
+    int m_part = m / proc_num;
+    int n_part = n;
+    int k = 0;
+    if (id == 0)
+    {
+        Q = malloc(n_part * n_part * sizeof(double));
+        LAPACKE_dlaset(LAPACK_COL_MAJOR, 'A', n_part, n_part, 0.0, 1.0, Y, m_part);
+    }
+    while ((1 << k) < proc_num)
+    {
+        k++;
+    }
+    while (k >= 1)
+    {
+        if (id)
+        {
+        }
+        k--;
+    }
 }
 
 void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A, int row, int col, Matrix *T)
 {
+    int id;
+    double *data;
+    TSQR_init(proc_row_id, proc_col_id, m, n, A, row, col, &data, &id);
+
     double *Y, *R, *tau;
     size_t *Y_heads;
-    TSQR(rank, my_row, my_col, m, n, A, 0, 0, T, Y, Y_heads, R, tau);
+    TSQR(id, m, n, data, Y, Y_heads, R, tau);
     double *Q;
 }
 
