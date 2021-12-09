@@ -174,7 +174,7 @@ void print_matrix(char *msg, Matrix *matrix, int rank)
         {
             double val = get(matrix, i, j);
             if (rank == 0)
-                printf("%12.8lf,", val);
+                printf("%.18lf,", val);
         }
         if (rank == 0)
             printf("],\n");
@@ -488,6 +488,7 @@ void TSQR_init(int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, i
                 printf("%lf\n", (*data)[2]);
             }
             cnt++;
+            MPI_Barrier(MPI_COMM_WORLD);
         }
     }
 }
@@ -573,9 +574,9 @@ void TSQR(int id, int m, int n, double **data, double **Y, size_t **Y_heads, dou
 
         k++;
     }
-    append(*Y_heads, Y_heads_size, Y_size);
+    MPI_Barrier(MPI_COMM_WORLD);
 
-    blacs_barrier_(&icontext, ADDR(char, 'A'));
+    append(*Y_heads, Y_heads_size, Y_size);
 
     // if (id == -1)
     // {
@@ -687,6 +688,7 @@ void construct_TSQR_Q(int id, int m, int n, double *Y, size_t *Y_heads, double *
     // }
     // printf("]");
     LAPACKE_dormqr(LAPACK_COL_MAJOR, 'L', 'N', m_Y, n_part, n_part, &Y[Y_heads[0]], m_Y, &tau[0], Q_tmp, m_Y);
+    MPI_Barrier(MPI_COMM_WORLD);
 
     free(Q);
     *Q_ret = Q_tmp;
@@ -713,31 +715,46 @@ void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A
             printf("[");
             for (int col = 0; col < n_part; col++)
             {
-                printf("%lf, ", R[col * n_part + row]);
+                printf("%.18lf, ", R[col * n_part + row]);
+                fflush(stdout);
             }
             printf("],\n");
         }
         printf("]\n");
     }
+    MPI_Barrier(MPI_COMM_WORLD);
+
     double *Q;
     construct_TSQR_Q(id, m, n, Y, Y_heads, tau, &Q);
     if (id == 0)
         printf("Q=[\n");
+    MPI_Barrier(MPI_COMM_WORLD);
+
     for (int p = 0; p < proc_num; p++)
     {
         if (p == id)
         {
+            printf("#p = %d\n", id);
             for (int i = 0; i < m / proc_num; i++)
             {
                 printf("[");
+                fflush(stdout);
                 for (int j = 0; j < n; j++)
                 {
-                    printf("%lf ,", Q[j * m / proc_num + i]);
+                    printf("%.18lf ,", Q[j * m / proc_num + i]);
+                    fflush(stdout);
                 }
                 printf("],\n");
+                fflush(stdout);
             }
         }
-        blacs_barrier_(&icontext, ADDR(char, 'A'));
+        else
+        {
+            // MPI_Barrierはfflushではprintfの出力順を指定できないので，sleep(1)で無理やり出力を安定させる
+            sleep(1);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+        // blacs_barrier_(&icontext, ADDR(char, 'A'));
     }
     if (id == 0)
         printf("]\n");
@@ -792,9 +809,24 @@ int main(int argc, char **argv)
                          // set(A, j, i, r);
                      }
                  });
-    blacs_barrier_(&icontext, ADDR(char, 'A'));
+    if (rank == 0)
+    {
+        printf("import numpy as np\n");
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
     print_matrix("A=", A, rank);
+    MPI_Barrier(MPI_COMM_WORLD);
+
     TSQR_HR(rank, my_row, my_col, m, n, A, 0, 0, T);
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0)
+    {
+        printf("A = np.matrix(A)\n");
+        printf("Q = np.matrix(Q)\n");
+        printf("R = np.matrix(R)\n");
+        printf("print(np.linalg.norm(A-Q.dot(R)))\n");
+    }
     free_matrix(A);
 
     MPI_Finalize();

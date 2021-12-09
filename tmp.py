@@ -272,4 +272,4 @@ Q=[
 A = np.matrix(A)
 Q = np.matrix(Q)
 R = np.matrix(R)
-print(A-Q.dot(R))
+print(np.linalg.norm(A-Q.dot(R)))
