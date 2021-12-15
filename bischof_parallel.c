@@ -12,15 +12,15 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define ADDR(t, v) \
     &(t) { v }
-#define rprintf(...)                                \
-    do                                              \
-    {                                               \
-        if (rank == 0)                              \
-        {                                           \
-            sbprintf(__VA_ARGS__);                  \
-        }                                           \
-        blacs_barrier_(&icontext, ADDR(char, 'A')); \
-                                                    \
+#define rprintf(...)                                   \
+    do                                                 \
+    {                                                  \
+        if (rank == 0)                                 \
+        {                                              \
+            sbprintf(__VA_ARGS__);                     \
+        }                                              \
+        blacs_barrier_(&icontext_2d, ADDR(char, 'A')); \
+                                                       \
     } while (0)
 
 #define measure_time(x)                                                                                                 \
@@ -77,7 +77,8 @@ int block_col;
 
 int my_row;
 int my_col;
-int icontext;
+int icontext_2d;
+int icontext_1d;
 int rank;
 bool print_checkcode = true;
 
@@ -112,7 +113,7 @@ Matrix *create_matrix(int nproc_row, int nproc_col, int global_row, int global_c
     matrix->data = malloc(matrix->leading_dimension * matrix->local_col * sizeof(double));
     // matrix->data = malloc(1024 * 1024 * sizeof(double));
     int ierror;
-    descinit_(matrix->desc, &(matrix->global_row), &(matrix->global_col), ADDR(int, block_row), ADDR(int, block_col), ADDR(int, 0), ADDR(int, 0), &icontext, &(matrix->leading_dimension), &ierror);
+    descinit_(matrix->desc, &(matrix->global_row), &(matrix->global_col), ADDR(int, block_row), ADDR(int, block_col), ADDR(int, 0), ADDR(int, 0), &icontext_2d, &(matrix->leading_dimension), &ierror);
     assert(ierror == 0);
     return matrix;
 }
@@ -188,7 +189,7 @@ void pdgemr2d_wrap(int m, int n, Matrix *A, int row_a, int col_a, Matrix *B, int
     col_a++;
     row_b++;
     col_b++;
-    pdgemr2d_(&m, &n, A->data, &row_a, &col_a, A->desc, B->data, &row_b, &col_b, B->desc, &icontext);
+    pdgemr2d_(&m, &n, A->data, &row_a, &col_a, A->desc, B->data, &row_b, &col_b, B->desc, &icontext_2d);
 }
 
 void pdlaset_wrap(char uplo, int m, int n, double alpha, double beta, Matrix *A, int row, int col)
@@ -431,9 +432,9 @@ int main(int argc, char **argv)
     nproc_row = dims[0];
     nproc_col = dims[1];
 
-    blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext);
-    blacs_gridinit_(&icontext, ADDR(char, 'R'), &nproc_row, &nproc_col);
-    blacs_gridinfo_(&icontext, &nproc_row, &nproc_col, &my_row, &my_col);
+    blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext_2d);
+    blacs_gridinit_(&icontext_2d, ADDR(char, 'R'), &nproc_row, &nproc_col);
+    blacs_gridinfo_(&icontext_2d, &nproc_row, &nproc_col, &my_row, &my_col);
 
     Matrix *A = create_matrix(nproc_row, nproc_col, m, m, block_row, block_col);
     Matrix *T = create_matrix(nproc_row, nproc_col, L, m, block_row, block_col);
@@ -449,7 +450,7 @@ int main(int argc, char **argv)
             set(A, j, i, r);
         }
     });
-    blacs_barrier_(&icontext, ADDR(char, 'A'));
+    blacs_barrier_(&icontext_2d, ADDR(char, 'A'));
     if (print_checkcode)
     {
         rprintf("import numpy as np\n");
@@ -479,7 +480,7 @@ int main(int argc, char **argv)
             }
         }
     }
-    blacs_barrier_(&icontext, ADDR(char, 'A'));
+    blacs_barrier_(&icontext_2d, ADDR(char, 'A'));
 
     if (print_checkcode)
     {
@@ -489,7 +490,7 @@ int main(int argc, char **argv)
         print_matrix("Y=", Y, rank);
     }
 
-    blacs_barrier_(&icontext, ADDR(char, 'A'));
+    blacs_barrier_(&icontext_2d, ADDR(char, 'A'));
 
     double val = get(A, 0, 0);
     rprintf("%lf\n", val);

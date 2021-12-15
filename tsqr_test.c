@@ -14,15 +14,15 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define ADDR(t, v) \
     &(t) { v }
-#define rprintf(...)                                \
-    do                                              \
-    {                                               \
-        if (rank == 0)                              \
-        {                                           \
-            sbprintf(__VA_ARGS__);                  \
-        }                                           \
-        blacs_barrier_(&icontext, ADDR(char, 'A')); \
-                                                    \
+#define rprintf(...)                                   \
+    do                                                 \
+    {                                                  \
+        if (rank == 0)                                 \
+        {                                              \
+            sbprintf(__VA_ARGS__);                     \
+        }                                              \
+        blacs_barrier_(&icontext_2d, ADDR(char, 'A')); \
+                                                       \
     } while (0)
 
 #define measure_time(x)                                                                                                 \
@@ -89,7 +89,7 @@ int my_col;
 int proc_num;
 int proc_row_num;
 int proc_col_num;
-int icontext;
+int icontext_2d;
 int rank;
 bool print_checkcode = true;
 
@@ -124,7 +124,7 @@ Matrix *create_matrix(int nproc_row, int nproc_col, int global_row, int global_c
     matrix->data = malloc(matrix->leading_dimension * matrix->local_col * sizeof(double));
     // matrix->data = malloc(1024 * 1024 * sizeof(double));
     int ierror;
-    descinit_(matrix->desc, &(matrix->global_row), &(matrix->global_col), ADDR(int, block_row), ADDR(int, block_col), ADDR(int, 0), ADDR(int, 0), &icontext, &(matrix->leading_dimension), &ierror);
+    descinit_(matrix->desc, &(matrix->global_row), &(matrix->global_col), ADDR(int, block_row), ADDR(int, block_col), ADDR(int, 0), ADDR(int, 0), &icontext_2d, &(matrix->leading_dimension), &ierror);
     assert(ierror == 0);
     return matrix;
 }
@@ -200,7 +200,7 @@ void pdgemr2d_wrap(int m, int n, Matrix *A, int row_a, int col_a, Matrix *B, int
     col_a++;
     row_b++;
     col_b++;
-    pdgemr2d_(&m, &n, A->data, &row_a, &col_a, A->desc, B->data, &row_b, &col_b, B->desc, &icontext);
+    pdgemr2d_(&m, &n, A->data, &row_a, &col_a, A->desc, B->data, &row_b, &col_b, B->desc, &icontext_2d);
 }
 
 void pdlaset_wrap(char uplo, int m, int n, double alpha, double beta, Matrix *A, int row, int col)
@@ -467,7 +467,7 @@ void TSQR_init(int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, i
 
             int ierror;
             descinit_(matrixes[current_grid_pos].desc, &(matrixes[current_grid_pos].global_row),
-                      &(matrixes[current_grid_pos].global_col), ADDR(int, matrixes[current_grid_pos].global_row), ADDR(int, matrixes[current_grid_pos].global_col), ADDR(int, i), ADDR(int, j), &icontext, &(matrixes[current_grid_pos].leading_dimension), &ierror);
+                      &(matrixes[current_grid_pos].global_col), ADDR(int, matrixes[current_grid_pos].global_row), ADDR(int, matrixes[current_grid_pos].global_col), ADDR(int, i), ADDR(int, j), &icontext_2d, &(matrixes[current_grid_pos].leading_dimension), &ierror);
 
             assert(ierror == 0);
             pdgemr2d_wrap(matrixes[current_grid_pos].global_row, matrixes[current_grid_pos].global_col, matrix, row + matrixes[current_grid_pos].global_row * cnt, col, &(matrixes[current_grid_pos]), 0, 0);
@@ -496,7 +496,7 @@ void TSQR_init(int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, i
 // TODO:冗長な二重ポインタを取り除く
 void TSQR(int id, int m, int n, double **data, double **Y, size_t **Y_heads, double **R, double **tau)
 {
-    blacs_barrier_(&icontext, ADDR(char, 'A'));
+    blacs_barrier_(&icontext_2d, ADDR(char, 'A'));
     // for (int k = 0; k < proc_num; k++)
     // {
     //     if (k == id)
@@ -741,7 +741,7 @@ void modified_LU_decomposition(int id, int m, int n, double *Y, double **S_ret)
     // free(S);
 }
 
-void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A, int row, int col, Matrix *T)
+void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A, int row, int col, Matrix *T_ret)
 {
     int id;
     double *data;
@@ -753,21 +753,6 @@ void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A
     assert(m % proc_num == 0);
     int m_part = m / proc_num;
     int n_part = n;
-    if (id == 0)
-    {
-        printf("R=[\n");
-        for (int row = 0; row < n_part; row++)
-        {
-            printf("[");
-            for (int col = 0; col < n_part; col++)
-            {
-                printf("%.18lf, ", R[col * n_part + row]);
-                fflush(stdout);
-            }
-            printf("],\n");
-        }
-        printf("]\n");
-    }
     MPI_Barrier(MPI_COMM_WORLD);
 
     double *Q;
@@ -847,7 +832,7 @@ void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A
         }
         printf("]\n");
 
-        printf("L=[\n");
+        printf("Y=[\n");
         for (int i = 0; i < m_part; i++)
         {
             printf("[");
@@ -900,6 +885,67 @@ void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A
     }
     if (id == 0)
         printf("]\n");
+    double *T;
+    if (id == 0)
+    {
+
+        double *SY1 = calloc(n * n, sizeof(double));
+        T = calloc(n * n, sizeof(double));
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'L', n, n, Q, m_part, SY1, n);
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n, n, Q, m_part, T, n);
+
+        LAPACKE_dtrtri(LAPACK_COL_MAJOR, 'L', 'U', n, SY1, n);
+        for (int i = 0; i < n; i++)
+        {
+            for (int j = 0; j < n; j++)
+            {
+                T[i + j * n] *= S[j];
+                R[i + j * n_part] *= S[i];
+            }
+        }
+
+        cblas_dtrmm(CblasColMajor, CblasRight, CblasLower, CblasTrans, CblasUnit, n, n, -1.0, SY1, n, T, n);
+        free(SY1);
+    }
+    if (id == 0)
+    {
+        printf("T=[\n");
+        for (int row = 0; row < n_part; row++)
+        {
+            printf("[");
+            for (int col = 0; col < n_part; col++)
+            {
+                printf("%.18lf, ", T[col * n_part + row]);
+                fflush(stdout);
+            }
+            printf("],\n");
+        }
+        printf("]\n");
+        printf("R=[\n");
+        for (int row = 0; row < n_part; row++)
+        {
+            printf("[");
+            for (int col = 0; col < n_part; col++)
+            {
+                printf("%.18lf, ", R[col * n_part + row]);
+                fflush(stdout);
+            }
+            printf("],\n");
+        }
+        for (int row = n_part; row < m; row++)
+        {
+            printf("[");
+            for (int col = 0; col < n_part; col++)
+            {
+                printf("0.0, ");
+                fflush(stdout);
+            }
+            printf("],\n");
+        }
+
+        printf("]\n");
+    }
+
     return;
 }
 
@@ -932,9 +978,9 @@ int main(int argc, char **argv)
     proc_row_num = dims[0];
     proc_col_num = dims[1];
 
-    blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext);
-    blacs_gridinit_(&icontext, ADDR(char, 'R'), &proc_row_num, &proc_col_num);
-    blacs_gridinfo_(&icontext, &proc_row_num, &proc_col_num, &my_row, &my_col);
+    blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext_2d);
+    blacs_gridinit_(&icontext_2d, ADDR(char, 'R'), &proc_row_num, &proc_col_num);
+    blacs_gridinfo_(&icontext_2d, &proc_row_num, &proc_col_num, &my_row, &my_col);
     n = 32;
     // main calc
     // printf("%d %d", m, n);
@@ -973,7 +1019,7 @@ int main(int argc, char **argv)
         printf("R = np.matrix(R)\n");
         printf("Q = np.matrix(Q)\n");
         printf("S = np.matrix(S)\n");
-        printf("L = np.matrix(L)\n");
+        printf("Y = np.matrix(Y)\n");
         printf("U = np.matrix(U)\n");
     }
     return 0;
