@@ -432,7 +432,7 @@ void TSQR_init(int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, i
     int n_part = n;
     int desc[DESC_LEN];
     int ierror;
-    descinit_(desc, &m, &n, &m_part, &n_part, ADDR(int, 0), ADDR(int, 0), &icontext_1d, &m_part, &ierror);
+    descinit_(desc, ADDR(int, m), ADDR(int, n), &m_part, &n_part, ADDR(int, 0), ADDR(int, 0), &icontext_1d, &m_part, &ierror);
     Matrix mat;
     mat.desc = desc;
     mat.data = malloc(m_part * n_part * sizeof(double));
@@ -932,7 +932,7 @@ void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A
     Matrix mat;
     mat.data = Q;
     mat.desc = desc;
-    pdgemr2d_wrap(m, n, &mat, 0, 0, A, 0, 0);
+    pdgemr2d_wrap(m, n, &mat, 0, 0, A, row, col);
     MPI_Barrier(MPI_COMM_WORLD);
 
     descinit_(&desc, ADDR(int, n),
@@ -990,7 +990,7 @@ int main(int argc, char **argv)
     }
 
     Matrix *A = create_matrix(proc_row_num, proc_col_num, m, n, block_row, block_col);
-    Matrix *T = create_matrix(proc_row_num, proc_col_num, n, n, block_row, block_col);
+    Matrix *T = create_matrix(proc_row_num, proc_col_num, n - 3, n - 3, block_row, block_col);
 
     measure_time(for (size_t i = 0; i < A->global_row; ++i) {
         for (size_t j = 0; j < A->global_col; ++j)
@@ -1006,7 +1006,7 @@ int main(int argc, char **argv)
     print_matrix("A=", A, rank);
     MPI_Barrier(MPI_COMM_WORLD);
 
-    TSQR_HR(rank, my_row, my_col, m, n, A, 0, 0, T);
+    TSQR_HR(rank, my_row, my_col, m, n - 3, A, 0, 3, T);
     MPI_Barrier(MPI_COMM_WORLD);
     print_matrix("ret=", A, rank);
     print_matrix("T=", T, rank);
