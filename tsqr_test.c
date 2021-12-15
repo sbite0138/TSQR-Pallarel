@@ -341,6 +341,12 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
         free(tau););
 }
 
+bool can_TSQR(int m, int n)
+{
+    //rprintf("m %d n %d proc_num %d\n", m, n, proc_num);
+    return m >= proc_num * n;
+}
+
 void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Matrix *T, Matrix *Y)
 {
     int nb = L;
@@ -360,7 +366,15 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
         //  rprintf("iteration %d/%d\n", k + 1, N / L - 1);
         int Nk = N - L - k * L;
         // Aの(k+1,k)ブロック以下をQR分解する
-        measure_time(pdgeqrt_wrap(rank, nproc_row, nproc_col, Nk, L, A, (k + 1) * L, k * L, T_iter));
+        if (can_TSQR(Nk, L))
+        {
+            rprintf("# TSQR!\n");
+            measure_time(TSQR_HR(rank, nproc_row, nproc_col, Nk, L, A, (k + 1) * L, k * L, T_iter));
+        }
+        else
+        {
+            measure_time(pdgeqrt_wrap(rank, nproc_row, nproc_col, Nk, L, A, (k + 1) * L, k * L, T_iter));
+        }
         measure_time(pdlaset_wrap('L', L, L, 0.0, 0.0, T, 0, L * k));
 
         // print_matrix("A part = ", Nk, L, a_part, lda);
@@ -1071,40 +1085,66 @@ int main(int argc, char **argv)
     {
         printf("import numpy as np\n");
     }
-
-    Matrix *A = create_matrix(proc_row_num, proc_col_num, m, n, block_row, block_col);
-    Matrix *T = create_matrix(proc_row_num, proc_col_num, n - 3, n - 3, block_row, block_col);
-
+    Matrix *A = create_matrix(proc_row_num, proc_col_num, m, m, block_row, block_col);
+    Matrix *T = create_matrix(proc_row_num, proc_col_num, L, m, block_row, block_col);
+    Matrix *Y = create_matrix(proc_row_num, proc_col_num, m, m, block_row, block_col);
     measure_time(for (size_t i = 0; i < A->global_row; ++i)
                  {
-                     for (size_t j = 0; j < A->global_col; ++j)
+                     for (size_t j = i; j < A->global_col; ++j)
                      {
-                         // double r = i * A->global_col + j;
                          double r = (double)(rand()) / RAND_MAX;
                          set(A, i, j, r);
-                         // set(A, j, i, r);
+                         set(A, j, i, r);
                      }
                  });
+    blacs_barrier_(&icontext_2d, ADDR(char, 'A'));
+    if (print_checkcode)
+    {
+        rprintf("import numpy as np\n");
+
+        print_matrix("A=", A, rank);
+    }
+
+    measure_time(bischof(rank, proc_row_num, proc_col_num, m, L, A, T, Y));
+    if (print_checkcode)
+    {
+        for (int i = 0; i < m; i++)
+        {
+            for (int j = i; j < m; j++)
+            {
+                set(A, i, j, get(A, j, i));
+            }
+        }
+
+        for (int i = 0; i < m; i++)
+        {
+            for (int j = 0; j < m; j++)
+            {
+                if (abs(i - j) > L)
+                {
+                    set(A, i, j, 0.0);
+                }
+            }
+        }
+        print_matrix("B=", A, rank);
+        rprintf("\nA = np.matrix(A)\nB = np.matrix(B)\ne=0\nfor i, j in zip(sorted(np.linalg.eigvals(A)), sorted(np.linalg.eigvals(B))):\n    print(i, j)\n    e+=(i-j)**2\n\nprint('error=',e**0.5)\n");
+        // print_matrix("T=", T, rank);
+        // print_matrix("Y=", Y, rank);
+    }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    print_matrix("A=", A, rank);
+    //print_matrix("A=", A, rank);
     MPI_Barrier(MPI_COMM_WORLD);
 
-    TSQR_HR(rank, my_row, my_col, m, n - 3, A, 0, 3, T);
+    //TSQR_HR(rank, my_row, my_col, m, n - 3, A, 0, 3, T);
     MPI_Barrier(MPI_COMM_WORLD);
-    print_matrix("ret=", A, rank);
-    print_matrix("T=", T, rank);
+    // print_matrix("ret=", A, rank);
+    // print_matrix("T=", T, rank);
 
     free_matrix(A);
 
     MPI_Finalize();
     if (rank == 0)
         dumpBuffer();
-    if (rank == 0)
-    {
-        printf("A = np.matrix(A)\n");
-        printf("ret = np.matrix(ret)\n");
-        printf("T = np.matrix(T)\n");
-    }
     return 0;
 }
