@@ -90,6 +90,7 @@ int proc_num;
 int proc_row_num;
 int proc_col_num;
 int icontext_2d;
+int icontext_1d;
 int rank;
 bool print_checkcode = true;
 
@@ -757,134 +758,134 @@ void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A
 
     double *Q;
     construct_TSQR_Q(id, m, n, Y, Y_heads, tau, &Q);
-    if (id == 0)
-        printf("Q=[\n");
-    MPI_Barrier(MPI_COMM_WORLD);
-    for (int p = 0; p < proc_num; p++)
-    {
-        if (p == id)
-        {
-            // printf("#p = %d\n", id);
-            for (int i = 0; i < m / proc_num; i++)
-            {
-                printf("[");
-                fflush(stdout);
-                for (int j = 0; j < n; j++)
-                {
-                    printf("%.18lf ,", Q[j * m / proc_num + i]);
-                    fflush(stdout);
-                }
-                printf("],\n");
-                fflush(stdout);
-            }
-        }
-        else
-        {
-            // MPI_Barrierはfflushではprintfの出力順を指定できないので，sleep(1)で無理やり出力を安定させる
-            sleep(1);
-        }
-        MPI_Barrier(MPI_COMM_WORLD);
-        // blacs_barrier_(&icontext, ADDR(char, 'A'));
-    }
-    if (id == 0)
-        printf("]\n");
+    // if (id == 0)
+    //     printf("Q=[\n");
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // for (int p = 0; p < proc_num; p++)
+    // {
+    //     if (p == id)
+    //     {
+    //         // printf("#p = %d\n", id);
+    //         for (int i = 0; i < m / proc_num; i++)
+    //         {
+    //             printf("[");
+    //             fflush(stdout);
+    //             for (int j = 0; j < n; j++)
+    //             {
+    //                 printf("%.18lf ,", Q[j * m / proc_num + i]);
+    //                 fflush(stdout);
+    //             }
+    //             printf("],\n");
+    //             fflush(stdout);
+    //         }
+    //     }
+    //     else
+    //     {
+    //         // MPI_Barrierはfflushではprintfの出力順を指定できないので，sleep(1)で無理やり出力を安定させる
+    //         sleep(1);
+    //     }
+    //     MPI_Barrier(MPI_COMM_WORLD);
+    //     // blacs_barrier_(&icontext, ADDR(char, 'A'));
+    // }
+    // if (id == 0)
+    //     printf("]\n");
 
     double *S; // = malloc(n * sizeof(double));
     modified_LU_decomposition(id, m_part, n, Q, &S);
 
-    if (id == 0)
-    {
-        printf("S=[\n");
-        for (int i = 0; i < n; i++)
-        {
-            printf("[");
-            for (int j = 0; j < n; j++)
-            {
-                if (i == j)
-                {
-                    printf("%.18lf, ", S[i]);
-                }
-                else
-                {
-                    printf("0, ");
-                }
-            }
-            printf("],\n");
-        }
-        printf("]\n");
+    // if (id == 0)
+    // {
+    //     printf("S=[\n");
+    //     for (int i = 0; i < n; i++)
+    //     {
+    //         printf("[");
+    //         for (int j = 0; j < n; j++)
+    //         {
+    //             if (i == j)
+    //             {
+    //                 printf("%.18lf, ", S[i]);
+    //             }
+    //             else
+    //             {
+    //                 printf("0, ");
+    //             }
+    //         }
+    //         printf("],\n");
+    //     }
+    //     printf("]\n");
 
-        printf("U=[\n");
-        for (int i = 0; i < n; i++)
-        {
-            printf("[");
-            for (int j = 0; j < n; j++)
-            {
-                if (i <= j)
-                {
-                    printf("%.18lf, ", Q[i + j * m_part]);
-                }
-                else
-                {
-                    printf("0, ");
-                }
-            }
-            printf("],\n");
-        }
-        printf("]\n");
+    //     printf("U=[\n");
+    //     for (int i = 0; i < n; i++)
+    //     {
+    //         printf("[");
+    //         for (int j = 0; j < n; j++)
+    //         {
+    //             if (i <= j)
+    //             {
+    //                 printf("%.18lf, ", Q[i + j * m_part]);
+    //             }
+    //             else
+    //             {
+    //                 printf("0, ");
+    //             }
+    //         }
+    //         printf("],\n");
+    //     }
+    //     printf("]\n");
 
-        printf("Y=[\n");
-        for (int i = 0; i < m_part; i++)
-        {
-            printf("[");
-            for (int j = 0; j < n; j++)
-            {
-                if (i > j)
-                {
-                    printf("%.18lf, ", Q[i + j * m_part]);
-                }
-                else if (i == j)
-                {
-                    printf("1, ");
-                }
-                else
-                {
-                    printf("0, ");
-                }
-            }
-            printf("],\n");
-        }
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
-    sleep(1);
+    //     printf("Y=[\n");
+    //     for (int i = 0; i < m_part; i++)
+    //     {
+    //         printf("[");
+    //         for (int j = 0; j < n; j++)
+    //         {
+    //             if (i > j)
+    //             {
+    //                 printf("%.18lf, ", Q[i + j * m_part]);
+    //             }
+    //             else if (i == j)
+    //             {
+    //                 printf("1, ");
+    //             }
+    //             else
+    //             {
+    //                 printf("0, ");
+    //             }
+    //         }
+    //         printf("],\n");
+    //     }
+    // }
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // sleep(1);
 
-    for (int p = 1; p < proc_num; p++)
-    {
-        if (p == id)
-        {
-            // printf("#p = %d\n", id);
-            for (int i = 0; i < m_part; i++)
-            {
-                printf("[");
-                fflush(stdout);
-                for (int j = 0; j < n; j++)
-                {
-                    printf("%.18lf ,", Q[j * m_part + i]);
-                    fflush(stdout);
-                }
-                printf("],\n");
-                fflush(stdout);
-            }
-        }
-        else
-        {
-            // MPI_Barrierはfflushではprintfの出力順を指定できないので，sleep(1)で無理やり出力を安定させる
-            sleep(1);
-        }
-        MPI_Barrier(MPI_COMM_WORLD);
-        // blacs_barrier_(&icontext, ADDR(char, 'A'));
-    }
-    if (id == 0)
-        printf("]\n");
+    // for (int p = 1; p < proc_num; p++)
+    // {
+    //     if (p == id)
+    //     {
+    //         // printf("#p = %d\n", id);
+    //         for (int i = 0; i < m_part; i++)
+    //         {
+    //             printf("[");
+    //             fflush(stdout);
+    //             for (int j = 0; j < n; j++)
+    //             {
+    //                 printf("%.18lf ,", Q[j * m_part + i]);
+    //                 fflush(stdout);
+    //             }
+    //             printf("],\n");
+    //             fflush(stdout);
+    //         }
+    //     }
+    //     else
+    //     {
+    //         // MPI_Barrierはfflushではprintfの出力順を指定できないので，sleep(1)で無理やり出力を安定させる
+    //         sleep(1);
+    //     }
+    //     MPI_Barrier(MPI_COMM_WORLD);
+    //     // blacs_barrier_(&icontext, ADDR(char, 'A'));
+    // }
+    // if (id == 0)
+    //     printf("]\n");
     double *T;
     if (id == 0)
     {
@@ -906,45 +907,62 @@ void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A
 
         cblas_dtrmm(CblasColMajor, CblasRight, CblasLower, CblasTrans, CblasUnit, n, n, -1.0, SY1, n, T, n);
         free(SY1);
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n, n, R, n, Q, m_part);
     }
-    if (id == 0)
-    {
-        printf("T=[\n");
-        for (int row = 0; row < n_part; row++)
-        {
-            printf("[");
-            for (int col = 0; col < n_part; col++)
-            {
-                printf("%.18lf, ", T[col * n_part + row]);
-                fflush(stdout);
-            }
-            printf("],\n");
-        }
-        printf("]\n");
-        printf("R=[\n");
-        for (int row = 0; row < n_part; row++)
-        {
-            printf("[");
-            for (int col = 0; col < n_part; col++)
-            {
-                printf("%.18lf, ", R[col * n_part + row]);
-                fflush(stdout);
-            }
-            printf("],\n");
-        }
-        for (int row = n_part; row < m; row++)
-        {
-            printf("[");
-            for (int col = 0; col < n_part; col++)
-            {
-                printf("0.0, ");
-                fflush(stdout);
-            }
-            printf("],\n");
-        }
 
-        printf("]\n");
-    }
+    // if (id == 0)
+    // {
+    //     printf("T=[\n");
+    //     for (int row = 0; row < n_part; row++)
+    //     {
+    //         printf("[");
+    //         for (int col = 0; col < n_part; col++)
+    //         {
+    //             printf("%.18lf, ", T[col * n_part + row]);
+    //             fflush(stdout);
+    //         }
+    //         printf("],\n");
+    //     }
+    //     printf("]\n");
+    //     printf("R=[\n");
+    //     for (int row = 0; row < n_part; row++)
+    //     {
+    //         printf("[");
+    //         for (int col = 0; col < n_part; col++)
+    //         {
+    //             printf("%.18lf, ", R[col * n_part + row]);
+    //             fflush(stdout);
+    //         }
+    //         printf("],\n");
+    //     }
+    //     for (int row = n_part; row < m; row++)
+    //     {
+    //         printf("[");
+    //         for (int col = 0; col < n_part; col++)
+    //         {
+    //             printf("0.0, ");
+    //             fflush(stdout);
+    //         }
+    //         printf("],\n");
+    //     }
+
+    //     printf("]\n");
+    // }
+
+    int desc[DESC_LEN];
+    int ierror;
+    descinit_(&desc, ADDR(int, m),
+              ADDR(int, n), ADDR(int, m_part), ADDR(int, n), ADDR(int, 0), ADDR(int, 0), &icontext_1d, ADDR(int, m_part), &ierror);
+    Matrix mat;
+    mat.data = Q;
+    mat.desc = desc;
+    pdgemr2d_wrap(m, n, &mat, 0, 0, A, 0, 0);
+
+    descinit_(&desc, ADDR(int, n),
+              ADDR(int, n), ADDR(int, n), ADDR(int, n), ADDR(int, 0), ADDR(int, 0), &icontext_1d, ADDR(int, n), &ierror);
+    mat.data = T;
+    mat.desc = desc;
+    pdgemr2d_wrap(n, n, &mat, 0, 0, T_ret, 0, 0);
 
     return;
 }
@@ -981,7 +999,11 @@ int main(int argc, char **argv)
     blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext_2d);
     blacs_gridinit_(&icontext_2d, ADDR(char, 'R'), &proc_row_num, &proc_col_num);
     blacs_gridinfo_(&icontext_2d, &proc_row_num, &proc_col_num, &my_row, &my_col);
-    n = 32;
+
+    blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext_1d);
+    blacs_gridinit_(&icontext_1d, ADDR(char, 'R'), ADDR(int, proc_row_num *proc_col_num), ADDR(int, 1));
+
+    n = 30;
     // main calc
     // printf("%d %d", m, n);
     if (rank == 0)
@@ -1008,6 +1030,9 @@ int main(int argc, char **argv)
 
     TSQR_HR(rank, my_row, my_col, m, n, A, 0, 0, T);
     MPI_Barrier(MPI_COMM_WORLD);
+    print_matrix("ret=", A, rank);
+    print_matrix("T=", T, rank);
+
     free_matrix(A);
 
     MPI_Finalize();
@@ -1016,11 +1041,8 @@ int main(int argc, char **argv)
     if (rank == 0)
     {
         printf("A = np.matrix(A)\n");
-        printf("R = np.matrix(R)\n");
-        printf("Q = np.matrix(Q)\n");
-        printf("S = np.matrix(S)\n");
-        printf("Y = np.matrix(Y)\n");
-        printf("U = np.matrix(U)\n");
+        printf("ret = np.matrix(ret)\n");
+        printf("T = np.matrix(T)\n");
     }
     return 0;
 }
