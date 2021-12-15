@@ -430,71 +430,17 @@ void TSQR_init(int proc_row_id, int proc_col_id, int m, int n, Matrix *matrix, i
 
     int m_part = m / proc_num;
     int n_part = n;
-    Matrix matrixes[proc_num];
-    // printf("\n%d\n", proc_num);
+    int desc[DESC_LEN];
+    int ierror;
+    descinit_(desc, &m, &n, &m_part, &n_part, ADDR(int, 0), ADDR(int, 0), &icontext_1d, &m_part, &ierror);
+    Matrix mat;
+    mat.desc = desc;
+    mat.data = malloc(m_part * n_part * sizeof(double));
 
-    // Ex: for 2x3 grid, mapping [row_id, col_id] => pos is like:
-    // 0 1 2
-    // 3 4 5
-    int my_grid_pos = proc_row_id * proc_col_num + proc_col_id;
-    *id = my_grid_pos;
-    int cnt = 0;
-    for (int i = 0; i < proc_row_num; i++)
-    {
-        // for (int j = 0; j < proc_col_num; j++)
-        for (int j = 0; j < proc_col_num; j++)
-        {
-            // printf("%d %d\n", i, j);
+    pdgemr2d_wrap(m, n, matrix, row, col, &mat, 0, 0);
 
-            // Ex: for 2x3 grid, mapping [row_id, col_id] => pos is like:
-            // 0 1 2
-            // 3 4 5
-            int current_grid_pos = i * proc_col_num + j;
-
-            // init each proc's matrix
-            matrixes[current_grid_pos].global_row = m_part;
-            matrixes[current_grid_pos].global_col = n_part;
-            // scalapackの仕様的にlocal_col/row>=block_col/rowである必要があるか？
-            // なければ以下の最後の + block_col/row は不要
-            matrixes[current_grid_pos].local_row = m_part; //+ block_row;
-            matrixes[current_grid_pos].local_col = n_part; // + block_col;
-
-            matrixes[current_grid_pos].leading_dimension = matrixes[current_grid_pos].local_row;
-            if (my_grid_pos == current_grid_pos)
-            {
-                // printf("[%d] %d ok\n", rank, icontext);
-                matrixes[current_grid_pos].data = malloc(matrixes[current_grid_pos].leading_dimension * matrixes[current_grid_pos].local_col * sizeof(double));
-                *data = matrixes[current_grid_pos].data;
-            }
-            matrixes[current_grid_pos].desc = malloc(DESC_LEN * sizeof(int));
-
-            int ierror;
-            descinit_(matrixes[current_grid_pos].desc, &(matrixes[current_grid_pos].global_row),
-                      &(matrixes[current_grid_pos].global_col), ADDR(int, matrixes[current_grid_pos].global_row), ADDR(int, matrixes[current_grid_pos].global_col), ADDR(int, i), ADDR(int, j), &icontext_2d, &(matrixes[current_grid_pos].leading_dimension), &ierror);
-
-            assert(ierror == 0);
-            pdgemr2d_wrap(matrixes[current_grid_pos].global_row, matrixes[current_grid_pos].global_col, matrix, row + matrixes[current_grid_pos].global_row * cnt, col, &(matrixes[current_grid_pos]), 0, 0);
-            if (false) //(my_grid_pos == current_grid_pos)
-            {
-                printf("desc %d\n", matrixes[current_grid_pos].desc[0]);
-                printf("desc %d\n", matrixes[current_grid_pos].desc[1]);
-                printf("desc %d\n", matrixes[current_grid_pos].desc[2]);
-                printf("desc %d\n", matrixes[current_grid_pos].desc[3]);
-                printf("desc %d\n", matrixes[current_grid_pos].desc[4]);
-                printf("desc %d\n", matrixes[current_grid_pos].desc[5]);
-                printf("desc %d\n", matrixes[current_grid_pos].desc[6]);
-                printf("desc %d\n", matrixes[current_grid_pos].desc[7]);
-                printf("desc %d\n", matrixes[current_grid_pos].desc[8]);
-
-                printf("%lf ", (*data)[0]);
-                printf("%lf ", (*data)[1]);
-                printf("%lf\n", (*data)[2]);
-            }
-            free(matrixes[current_grid_pos].desc);
-            cnt++;
-            MPI_Barrier(MPI_COMM_WORLD);
-        }
-    }
+    *data = mat.data;
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 // TODO:冗長な二重ポインタを取り除く
@@ -756,7 +702,7 @@ void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A
     int id;
     double *data;
     TSQR_init(proc_row_id, proc_col_id, m, n, A, row, col, &data, &id);
-
+    id = rank;
     MPI_Barrier(MPI_COMM_WORLD);
     double *Y, *R, *tau;
     size_t *Y_heads;
