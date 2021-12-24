@@ -23,17 +23,21 @@
                                                        \
     } while (0)
 
-#define measure_time(x)                                                                                                 \
-    do                                                                                                                  \
-    {                                                                                                                   \
-        double start = omp_get_wtime();                                                                                 \
-        {                                                                                                               \
-            x;                                                                                                          \
-        }                                                                                                               \
-        double end = omp_get_wtime();                                                                                   \
-        if (print_checkcode == false)                                                                                   \
-            rprintf("@ {\"rank\":%d, \"line\":%d, \"cmd\":\"%s\", \"time\":%.18f}\n", rank, __LINE__, #x, end - start); \
+#define measure_time(x)                                                                                                                     \
+    do                                                                                                                                      \
+    {                                                                                                                                       \
+        level++;                                                                                                                            \
+        double start = omp_get_wtime();                                                                                                     \
+        {                                                                                                                                   \
+            x;                                                                                                                              \
+        }                                                                                                                                   \
+        double end = omp_get_wtime();                                                                                                       \
+        level--;                                                                                                                            \
+        if (print_checkcode == false)                                                                                                       \
+            rprintf("@ {\"rank\":%d,\"level\":%d, \"line\":%d, \"cmd\":\"%s\", \"time\":%.18f}\n", rank, level, __LINE__, #x, end - start); \
     } while (0)
+
+int level = 0;
 
 typedef struct StringBuffer
 {
@@ -442,14 +446,15 @@ int main(int argc, char **argv)
 
     // Matrix *R = create_matrix(nproc_row, nproc_col, m, n, block_row, block_col);
 
-    measure_time(for (size_t i = 0; i < A->global_row; ++i) {
-        for (size_t j = i; j < A->global_col; ++j)
-        {
-            double r = (double)(rand()) / RAND_MAX;
-            set(A, i, j, r);
-            set(A, j, i, r);
-        }
-    });
+    measure_time(for (size_t i = 0; i < A->global_row; ++i)
+                 {
+                     for (size_t j = i; j < A->global_col; ++j)
+                     {
+                         double r = (double)(rand()) / RAND_MAX;
+                         set(A, i, j, r);
+                         set(A, j, i, r);
+                     }
+                 });
     blacs_barrier_(&icontext_2d, ADDR(char, 'A'));
     if (print_checkcode)
     {

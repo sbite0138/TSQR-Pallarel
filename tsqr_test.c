@@ -1,5 +1,5 @@
 #include <assert.h>
-// #include <mkl.h>
+//#include <mkl.h>
 #include <cblas.h>
 #include <lapacke.h>
 #include <mpi.h>
@@ -25,16 +25,18 @@
                                                        \
     } while (0)
 
-#define measure_time(x)                                                                                                 \
-    do                                                                                                                  \
-    {                                                                                                                   \
-        double start = omp_get_wtime();                                                                                 \
-        {                                                                                                               \
-            x;                                                                                                          \
-        }                                                                                                               \
-        double end = omp_get_wtime();                                                                                   \
-        if (print_checkcode == false)                                                                                   \
-            rprintf("@ {\"rank\":%d, \"line\":%d, \"cmd\":\"%s\", \"time\":%.18f}\n", rank, __LINE__, #x, end - start); \
+#define measure_time(x)                                                                                                                     \
+    do                                                                                                                                      \
+    {                                                                                                                                       \
+        level++;                                                                                                                            \
+        double start = omp_get_wtime();                                                                                                     \
+        {                                                                                                                                   \
+            x;                                                                                                                              \
+        }                                                                                                                                   \
+        double end = omp_get_wtime();                                                                                                       \
+        level--;                                                                                                                            \
+        if (print_checkcode == false)                                                                                                       \
+            rprintf("@ {\"rank\":%d,\"level\":%d, \"line\":%d, \"cmd\":\"%s\", \"time\":%.18f}\n", rank, level, __LINE__, #x, end - start); \
     } while (0)
 #define append(vec, vec_size, val)                           \
     do                                                       \
@@ -43,7 +45,7 @@
         (vec)[vec_size] = val;                               \
         vec_size++;                                          \
     } while (false)
-
+int level = 0;
 typedef struct StringBuffer
 {
     char *buf;
@@ -83,7 +85,6 @@ void dumpBuffer()
 const size_t DESC_LEN = 9;
 int block_row;
 int block_col;
-
 int my_row;
 int my_col;
 int proc_num;
@@ -91,8 +92,7 @@ int proc_row_num;
 int proc_col_num;
 int icontext_2d;
 int icontext_1d;
-int rank;
-bool print_checkcode = true;
+bool print_checkcode = false;
 
 typedef struct
 {
@@ -122,7 +122,7 @@ Matrix *create_matrix(int nproc_row, int nproc_col, int global_row, int global_c
     matrix->local_col = global_col / nproc_col + block_col;
     matrix->local_row = global_row / nproc_row + block_row;
     matrix->leading_dimension = matrix->local_row + 1;
-    matrix->data = malloc(matrix->leading_dimension * matrix->local_col * sizeof(double));
+    matrix->data = malloc(matrix->leading_dimension * matrix->local_col * (size_t)sizeof(double));
     // matrix->data = malloc(1024 * 1024 * sizeof(double));
     int ierror;
     descinit_(matrix->desc, &(matrix->global_row), &(matrix->global_col), ADDR(int, block_row), ADDR(int, block_col), ADDR(int, 0), ADDR(int, 0), &icontext_2d, &(matrix->leading_dimension), &ierror);
@@ -255,7 +255,7 @@ void pdgeqrf_wrap(int m, int n, Matrix *matrix, int row, int col, double *tau)
     double *work = malloc(32 * sizeof(double));
 
     // calculate length of work
-    int lwork = -1;
+    size_t lwork = -1;
     (pdgeqrf_(&m, &n, matrix->data, &row, &col, matrix->desc, tau, work, &lwork, &info));
     lwork = (int)(work[0] + 2);
     // reallocate and compute QR
@@ -278,7 +278,7 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
     assert(T->global_col >= n);
     double *tau;
     measure_time(
-        tau = malloc((n + col) * sizeof(double)));
+        tau = malloc(((size_t)n + (size_t)col) * sizeof(double)));
     measure_time(pdgeqrf_wrap(m, n, matrix, row, col, tau));
     int desc[9];
     desc[0] = 1;
@@ -343,8 +343,12 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
 
 bool can_TSQR(int m, int n)
 {
-    //rprintf("m %d n %d proc_num %d\n", m, n, proc_num);
-    return m >= proc_num * n;
+    int block_size = m / proc_num;
+    printf("block_size %d, m %d, proc_num %d, m mod proc_num %d\n", block_size, m, proc_num, m % proc_num);
+    // rprintf("m %d n %d proc_num %d\n", m, n, proc_num)
+
+    return (m >= proc_num * n) &&
+           (m % proc_num <= block_size);
 }
 
 void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Matrix *T, Matrix *Y)
@@ -454,11 +458,13 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
             pad = m % proc_num;
         }
     }
-
+    int x = numroc_(&m, &m_part, &rank, ADDR(int, 0), &proc_num);
+    printf("[%d] descinit 3 %d %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_part + pad, x);
     descinit_(desc, ADDR(int, m), ADDR(int, n), &m_part, &n_part, ADDR(int, 0), ADDR(int, 0), &icontext_1d, ADDR(int, m_part + pad), &ierror);
+    printf("[%d] done 3 %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_part + pad);
     Matrix mat;
     mat.desc = desc;
-    mat.data = malloc((m_part + pad) * n_part * sizeof(double));
+    mat.data = malloc(((size_t)m_part + (size_t)pad) * (size_t)n_part * sizeof(double));
 
     pdgemr2d_wrap(m, n, matrix, row, col, &mat, 0, 0);
     *data = mat.data;
@@ -466,8 +472,8 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
     {
         if (rank == 0)
         {
-            double *send = malloc(pad * n_part * sizeof(double));
-            double *shirnk = malloc(m_part * n_part * sizeof(double));
+            double *send = malloc((size_t)pad * (size_t)n_part * sizeof(double));
+            double *shirnk = malloc((size_t)m_part * (size_t)n_part * sizeof(double));
             LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_part, n_part, *data, m_part + pad, shirnk, m_part);
             LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', pad, n_part, &((*data)[m_part]), m_part + pad, send, pad);
             int ret = MPI_Send(send, pad * n_part, MPI_DOUBLE, proc_num - 1, 0, MPI_COMM_WORLD);
@@ -480,8 +486,8 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
         if (rank == proc_num - 1)
         {
             pad = m % proc_num;
-            double *recv = malloc(pad * n_part * sizeof(double));
-            double *expand = malloc((m_part + pad) * n_part * sizeof(double));
+            double *recv = malloc((size_t)pad * (size_t)n_part * sizeof(double));
+            double *expand = malloc(((size_t)m_part + (size_t)pad) * (size_t)n_part * sizeof(double));
             MPI_Status st;
             int ret = MPI_Recv(recv, pad * n_part, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &st);
             assert(ret == MPI_SUCCESS);
@@ -520,7 +526,7 @@ void TSQR(int id, int m_part, int n_part, double **data, double **Y, size_t **Y_
     //    printf("m %d n %d proc_num %d\n", m, n, proc_num);
     //   printf("m_part %d n_part %d\n", m_part, n_part);
     assert(m_part >= n_part);
-    *tau = malloc(n_part * sizeof(double));
+    *tau = malloc((size_t)n_part * sizeof(double));
     size_t tau_size = n_part;
     *R = calloc(n_part * n_part, sizeof(double));
     *Y = calloc(m_part * n_part, sizeof(double));
@@ -746,11 +752,13 @@ void modified_LU_decomposition(int id, int m_part, int n_part, double *Y, double
     // free(S);
 }
 
-void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A, int row, int col, Matrix *T_ret)
+void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix *A, int row, int col, Matrix *T_ret)
 {
     int id;
     double *data;
-
+    int rank;
+    int nrow, ncol, tmp;
+    blacs_gridinfo_(&icontext_1d, &row, &col, &rank, &tmp);
     TSQR_init(rank, m, n, A, row, col, &data);
 
     id = rank;
@@ -766,7 +774,7 @@ void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A
     int n_part = n;
     TSQR(id, m_part, n_part, &data, &Y, &Y_heads, &R, &tau);
 
-    //assert(m % proc_num == 0);
+    // assert(m % proc_num == 0);
     MPI_Barrier(MPI_COMM_WORLD);
     // if (id == 0)
     // {
@@ -1023,8 +1031,10 @@ void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A
     int ierror;
     // printf("[%d] m_part %d\n", id, m_part);
     // printf("[%d] pad %d\n", id, pad);
+    printf("[%d] descinit 1 %d %d %d %d %d %d\n", rank, m, n, m_part, n, icontext_1d, m_part + pad);
     descinit_(&desc, ADDR(int, m),
               ADDR(int, n), ADDR(int, m_part), ADDR(int, n), ADDR(int, 0), ADDR(int, 0), &icontext_1d, ADDR(int, m_part + pad), &ierror);
+    printf("[%d] done 1 %d %d %d %d %d %d\n", rank, m, n, m_part, n, icontext_1d, m_part + pad);
     Matrix mat;
     mat.data = Q;
     mat.desc = desc;
@@ -1032,8 +1042,10 @@ void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A
 
     MPI_Barrier(MPI_COMM_WORLD);
 
+    printf("[%d] descinit 2 %d %d %d %d %d %d\n", rank, n, n, n, n, icontext_1d, n);
     descinit_(&desc, ADDR(int, n),
               ADDR(int, n), ADDR(int, n), ADDR(int, n), ADDR(int, 0), ADDR(int, 0), &icontext_1d, ADDR(int, n), &ierror);
+    printf("[%d] done 2 %d %d %d %d %d %d\n", rank, n, n, n, n, icontext_1d, n);
     mat.data = T;
     mat.desc = desc;
     pdgemr2d_wrap(n, n, &mat, 0, 0, T_ret, 0, 0);
@@ -1044,6 +1056,8 @@ void TSQR_HR(int rank, int proc_row_id, int proc_col_id, int m, int n, Matrix *A
 
 int main(int argc, char **argv)
 {
+    int rank;
+
     // init
     MPI_Init(&argc, &argv);
     if (argc != 2)
@@ -1081,7 +1095,7 @@ int main(int argc, char **argv)
     n = 10;
     // main calc
     // printf("%d %d", m, n);
-    if (rank == 0)
+    if (rank == 0 && print_checkcode)
     {
         printf("import numpy as np\n");
     }
@@ -1133,10 +1147,10 @@ int main(int argc, char **argv)
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    //print_matrix("A=", A, rank);
+    // print_matrix("A=", A, rank);
     MPI_Barrier(MPI_COMM_WORLD);
 
-    //TSQR_HR(rank, my_row, my_col, m, n - 3, A, 0, 3, T);
+    // TSQR_HR(rank, my_row, my_col, m, n - 3, A, 0, 3, T);
     MPI_Barrier(MPI_COMM_WORLD);
     // print_matrix("ret=", A, rank);
     // print_matrix("T=", T, rank);
