@@ -470,7 +470,25 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
     // assert(m % proc_num == 0);
     assert(m >= proc_num * n);
 
-    int m_part = m / proc_num;
+    size_t m_part = m / proc_num;
+    size_t block_num = (m + m_part - 1) / m_part;
+    int have1 = -1;
+    int have2 = -1;
+    int need1 = -1;
+    int need2 = -1;
+
+    if (rank < block_num % proc_num)
+    {
+        need1 = 2 * rank;
+        need2 = 2 * rank + 1;
+        have1 = rank;
+        have2 = proc_num + rank;
+    }
+    else
+    {
+        need1 = rank + (block_num % proc_num);
+        have1 = rank;
+    }
     int n_part = n;
     int desc[DESC_LEN];
     int ierror;
