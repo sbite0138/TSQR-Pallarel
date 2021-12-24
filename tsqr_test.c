@@ -105,6 +105,30 @@ typedef struct
     size_t leading_dimension;
 } Matrix;
 
+typedef struct
+{
+    double *data;
+    size_t row;
+    size_t col;
+    size_t leading_dimension;
+} LocalMatrix;
+
+LocalMatrix *create_local_matrix(size_t row, size_t col)
+{
+    LocalMatrix *lmat = malloc(sizeof(LocalMatrix));
+    lmat->row = row;
+    lmat->col = col;
+    lmat->leading_dimension = row;
+    lmat->data = malloc(lmat->leading_dimension * lmat->col * sizeof(double));
+    return lmat;
+}
+
+void free_local_matrix(LocalMatrix *lmat)
+{
+    free(lmat->data);
+    free(lmat);
+}
+
 int min(int a, int b)
 {
     return (a < b ? a : b);
