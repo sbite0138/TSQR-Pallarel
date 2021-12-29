@@ -463,87 +463,72 @@ bool is_power_of_2(int n)
     return n == 1;
 }
 
-MPI_Request send_matrix(Matrix *mat, int send_rank, int block_id)
-{
-    assert(mat->local_row == mat->leading_dimension);
-    MPI_Request req;
-    return
-}
-
-void exchange(int m_total, int n, int m_part, int m_last, int block_num, int have1, int have2, int need1, int need2, Matrix *mat)
+void exchange(int m_total, int n, int m_part, int m_last, int block_num, int have1, int have2, int need1, int need2, Matrix *mat, int rank)
 {
     int m_head = m_part;
-    int m_tail = m_total;
+    int m_tail = m_total - m_head;
     assert(need1 != -1);
     assert(have1 != -1);
-
+    int t = proc_num - (block_num % proc_num);
+    printf("%d\n", m_last);
+    int recv1 = -1;
+    int recv2 = -1;
+    int send1 = -1;
+    int send2 = -1;
+    // set recv
+    recv1 = need1 % proc_num;
+    if (need2 != -1)
+    {
+        recv2 = need2 % proc_num;
+    }
+    send1 = have1;
+    if (send1 >= t)
+        send1 = (have1 - t) / 2 + t;
     if (have2 != -1)
     {
-        assert(need2 != -1);
-        assert(m_tail != 0);
-        double *data_send1 = malloc(m_head * n * sizeof(double));
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_head, n, mat->data, m_total, data_send1, m_head);
+        send2 = have2;
+        if (send2 >= t)
+            send2 = (have2 - t) / 2 + t;
+    }
+    printf("status [%d] %d %d %d %d\n", rank, send1, send2, recv1, recv2);
+    printf("send   [%d] %d %d\n", rank, m_head, m_tail);
+
+    MPI_Request reqs[4];
+
+    int reqs_idx = 0;
+    // send 1
+    double *data_send1 = malloc(m_head * n * sizeof(double));
+    LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_head, n, mat->data, m_total, data_send1, m_head);
+
+    MPI_Isend(data_send1, m_head * n, MPI_DOUBLE, send1, have1, MPI_COMM_WORLD, &reqs[reqs_idx++]);
+    //  recv 1
+    int m_recv1 = (need1 == block_num - 1) ? m_last : m_part;
+    double *data_recv1 = malloc(m_recv1 * n * sizeof(double));
+    MPI_Irecv(data_recv1, m_recv1 * n, MPI_DOUBLE, recv1, need1, MPI_COMM_WORLD, &reqs[reqs_idx++]);
+
+    // send 2
+    if (send2 != -1)
+    {
         double *data_send2 = malloc(m_tail * n * sizeof(double));
         LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_tail, n, mat->data, m_total, data_send2, m_tail);
-
-        int recv1 = need1 % proc_num;
-        int recv2 = need2 % proc_num;
-        int send1 = have1 / 2;
-        if (send1 >= block_num % proc_num)
-        {
-            send1 = have1 - (block_num % proc_num);
-        }
-        int send2 = have2 / 2;
-        if (send2 >= block_num % proc_num)
-        {
-            send2 = have2 - (block_num % proc_num);
-        }
-        MPI_Request reqs[4];
-        MPI_Isend(data_send1, m_head * n, MPI_DOUBLE, send1, have1, MPI_COMM_WORLD, &reqs[0]);
-        MPI_Isend(data_send2, m_head * n, MPI_DOUBLE, send2, have2, MPI_COMM_WORLD, &reqs[1]);
-
-        int m_recv1 = (recv1 == block_num - 1) ? m_last : m_part;
-        int m_recv2 = (recv2 == block_num - 1) ? m_last : m_part;
-        double *data_recv1 = malloc(m_recv1 * n * sizeof(double));
-        double *data_recv2 = malloc(m_recv2 * n * sizeof(double));
-
-        MPI_Irecv(data_recv1, m_recv1 * n, MPI_DOUBLE, recv1, need1, MPI_COMM_WORLD, &reqs[3]);
-        MPI_Irecv(data_recv2, m_recv2 * n, MPI_DOUBLE, recv2, need2, MPI_COMM_WORLD, &reqs[4]);
-
-        MPI_Status st;
-        MPI_Wait(&reqs[0], &st);
-        MPI_Wait(&reqs[1], &st);
-        MPI_Wait(&reqs[2], &st);
-        MPI_Wait(&reqs[3], &st);
+        MPI_Isend(data_send2, m_tail * n, MPI_DOUBLE, send2, have2, MPI_COMM_WORLD, &reqs[reqs_idx++]);
     }
-    else
+
+    // recv 2
+    if (recv2 != -1)
     {
-        assert(need2 == -1);
-        assert(m_tail == 0);
-        double *data_send1 = malloc(m_head * n * sizeof(double));
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_head, n, mat->data, m_total, data_send1, m_head);
-
-        int recv1 = need1 % proc_num;
-        int send1 = have1 / 2;
-        if (send1 >= block_num % proc_num)
-        {
-            send1 = have1 - (block_num % proc_num);
-        }
-        MPI_Request reqs[2];
-        MPI_Isend(data_send1, m_head * n, MPI_DOUBLE, send1, have1, MPI_COMM_WORLD, &reqs[0]);
-
-                int m_recv1 = (recv1 == block_num - 1) ? m_last : m_part;
-        double *data_recv1 = malloc(m_recv1 * n * sizeof(double));
+        int m_recv2 = (need2 == block_num - 1) ? m_last : m_part;
         double *data_recv2 = malloc(m_recv2 * n * sizeof(double));
+        MPI_Irecv(data_recv2, m_recv2 * n, MPI_DOUBLE, recv2, need2, MPI_COMM_WORLD, &reqs[reqs_idx++]);
+        printf("recv   [%d] %d \n", rank, m_recv2);
+        printf("mlast   [%d] %d\n", rank, (need2 == block_num - 1) ? m_last : m_part);
+    }
 
-        MPI_Irecv(data_recv1, m_recv1 * n, MPI_DOUBLE, recv1, need1, MPI_COMM_WORLD, &reqs[3]);
-        MPI_Irecv(data_recv2, m_recv2 * n, MPI_DOUBLE, recv2, need2, MPI_COMM_WORLD, &reqs[4]);
+    for (int i = 0; i < reqs_idx; i++)
+    {
 
         MPI_Status st;
-        MPI_Wait(&reqs[0], &st);
-        MPI_Wait(&reqs[1], &st);
-        MPI_Wait(&reqs[2], &st);
-        MPI_Wait(&reqs[3], &st);
+        MPI_Wait(&reqs[i], &st);
     }
 }
 void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double **data)
@@ -563,15 +548,22 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
 
     if (rank < block_num % proc_num)
     {
-        need1 = 2 * rank;
-        need2 = 2 * rank + 1;
         have1 = rank;
         have2 = proc_num + rank;
     }
     else
     {
-        need1 = rank + (block_num % proc_num);
         have1 = rank;
+    }
+    int t = proc_num - (block_num % proc_num);
+    if (rank < t)
+    {
+        need1 = rank;
+    }
+    else
+    {
+        need1 = 2 * (rank - t) + t;
+        need2 = need1 + 1;
     }
     int n_part = n;
     int desc[DESC_LEN];
@@ -585,8 +577,8 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
         }
     }
     int m_total = numroc_(&m, &m_part, &rank, ADDR(int, 0), &proc_num);
-    printf("[%d] descinit 3 %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_total);
-    descinit_(desc, ADDR(int, m), ADDR(int, n), &m_total, &n_part, ADDR(int, 0), ADDR(int, 0), &icontext_1d, &m_total, &ierror);
+    // printf("[%d] descinit 3 %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_total);
+    descinit_(desc, ADDR(int, m), ADDR(int, n), &m_part, &n, ADDR(int, 0), ADDR(int, 0), &icontext_1d, &m_total, &ierror);
     printf("[%d] done 3 %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_total);
     Matrix mat;
     mat.desc = desc;
@@ -594,7 +586,16 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
     printf("[%d] %d %d %d %d\n", rank, m, n, row, col);
     pdgemr2d_wrap(m, n, matrix, row, col, &mat, 0, 0);
     *data = mat.data;
-    exchange(m_total, n, m_part, block_num, have1, have2, need1, need2, &mat);
+    int m_last;
+    if (m % m_part == 0)
+    {
+        m_last = m_part;
+    }
+    else
+    {
+        m_last = m % m_part;
+    }
+    exchange(m_total, n, m_part, m_last, block_num, have1, have2, need1, need2, &mat, rank);
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
@@ -855,6 +856,7 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
     int rank;
     int nrow, ncol, tmp;
     blacs_gridinfo_(&icontext_1d, &nrow, &ncol, &rank, &tmp);
+
     TSQR_init(rank, m, n, A, row, col, &data);
     return;
     id = rank;
