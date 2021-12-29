@@ -463,8 +463,92 @@ bool is_power_of_2(int n)
     return n == 1;
 }
 
+MPI_Request send_matrix(Matrix *mat, int send_rank, int block_id)
+{
+    assert(mat->local_row == mat->leading_dimension);
+    MPI_Request req;
+    return
+}
+
+void exchange(int m_total, int n, int m_part, int m_last, int block_num, int have1, int have2, int need1, int need2, Matrix *mat)
+{
+    int m_head = m_part;
+    int m_tail = m_total;
+    assert(need1 != -1);
+    assert(have1 != -1);
+
+    if (have2 != -1)
+    {
+        assert(need2 != -1);
+        assert(m_tail != 0);
+        double *data_send1 = malloc(m_head * n * sizeof(double));
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_head, n, mat->data, m_total, data_send1, m_head);
+        double *data_send2 = malloc(m_tail * n * sizeof(double));
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_tail, n, mat->data, m_total, data_send2, m_tail);
+
+        int recv1 = need1 % proc_num;
+        int recv2 = need2 % proc_num;
+        int send1 = have1 / 2;
+        if (send1 >= block_num % proc_num)
+        {
+            send1 = have1 - (block_num % proc_num);
+        }
+        int send2 = have2 / 2;
+        if (send2 >= block_num % proc_num)
+        {
+            send2 = have2 - (block_num % proc_num);
+        }
+        MPI_Request reqs[4];
+        MPI_Isend(data_send1, m_head * n, MPI_DOUBLE, send1, have1, MPI_COMM_WORLD, &reqs[0]);
+        MPI_Isend(data_send2, m_head * n, MPI_DOUBLE, send2, have2, MPI_COMM_WORLD, &reqs[1]);
+
+        int m_recv1 = (recv1 == block_num - 1) ? m_last : m_part;
+        int m_recv2 = (recv2 == block_num - 1) ? m_last : m_part;
+        double *data_recv1 = malloc(m_recv1 * n * sizeof(double));
+        double *data_recv2 = malloc(m_recv2 * n * sizeof(double));
+
+        MPI_Irecv(data_recv1, m_recv1 * n, MPI_DOUBLE, recv1, need1, MPI_COMM_WORLD, &reqs[3]);
+        MPI_Irecv(data_recv2, m_recv2 * n, MPI_DOUBLE, recv2, need2, MPI_COMM_WORLD, &reqs[4]);
+
+        MPI_Status st;
+        MPI_Wait(&reqs[0], &st);
+        MPI_Wait(&reqs[1], &st);
+        MPI_Wait(&reqs[2], &st);
+        MPI_Wait(&reqs[3], &st);
+    }
+    else
+    {
+        assert(need2 == -1);
+        assert(m_tail == 0);
+        double *data_send1 = malloc(m_head * n * sizeof(double));
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_head, n, mat->data, m_total, data_send1, m_head);
+
+        int recv1 = need1 % proc_num;
+        int send1 = have1 / 2;
+        if (send1 >= block_num % proc_num)
+        {
+            send1 = have1 - (block_num % proc_num);
+        }
+        MPI_Request reqs[2];
+        MPI_Isend(data_send1, m_head * n, MPI_DOUBLE, send1, have1, MPI_COMM_WORLD, &reqs[0]);
+
+                int m_recv1 = (recv1 == block_num - 1) ? m_last : m_part;
+        double *data_recv1 = malloc(m_recv1 * n * sizeof(double));
+        double *data_recv2 = malloc(m_recv2 * n * sizeof(double));
+
+        MPI_Irecv(data_recv1, m_recv1 * n, MPI_DOUBLE, recv1, need1, MPI_COMM_WORLD, &reqs[3]);
+        MPI_Irecv(data_recv2, m_recv2 * n, MPI_DOUBLE, recv2, need2, MPI_COMM_WORLD, &reqs[4]);
+
+        MPI_Status st;
+        MPI_Wait(&reqs[0], &st);
+        MPI_Wait(&reqs[1], &st);
+        MPI_Wait(&reqs[2], &st);
+        MPI_Wait(&reqs[3], &st);
+    }
+}
 void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double **data)
 {
+
     assert(is_power_of_2(proc_num));
     // assert(is_power_of_2(m));
     // assert(m % proc_num == 0);
@@ -500,46 +584,17 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
             pad = m % proc_num;
         }
     }
-    int x = numroc_(&m, &m_part, &rank, ADDR(int, 0), &proc_num);
-    printf("[%d] descinit 3 %d %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_part + pad, x);
-    descinit_(desc, ADDR(int, m), ADDR(int, n), &m_part, &n_part, ADDR(int, 0), ADDR(int, 0), &icontext_1d, ADDR(int, m_part + pad), &ierror);
-    printf("[%d] done 3 %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_part + pad);
+    int m_total = numroc_(&m, &m_part, &rank, ADDR(int, 0), &proc_num);
+    printf("[%d] descinit 3 %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_total);
+    descinit_(desc, ADDR(int, m), ADDR(int, n), &m_total, &n_part, ADDR(int, 0), ADDR(int, 0), &icontext_1d, &m_total, &ierror);
+    printf("[%d] done 3 %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_total);
     Matrix mat;
     mat.desc = desc;
-    mat.data = malloc(((size_t)m_part + (size_t)pad) * (size_t)n_part * sizeof(double));
-
+    mat.data = malloc(((size_t)m_total) * (size_t)n_part * sizeof(double));
+    printf("[%d] %d %d %d %d\n", rank, m, n, row, col);
     pdgemr2d_wrap(m, n, matrix, row, col, &mat, 0, 0);
     *data = mat.data;
-    if (m % proc_num != 0)
-    {
-        if (rank == 0)
-        {
-            double *send = malloc((size_t)pad * (size_t)n_part * sizeof(double));
-            double *shirnk = malloc((size_t)m_part * (size_t)n_part * sizeof(double));
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_part, n_part, *data, m_part + pad, shirnk, m_part);
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', pad, n_part, &((*data)[m_part]), m_part + pad, send, pad);
-            int ret = MPI_Send(send, pad * n_part, MPI_DOUBLE, proc_num - 1, 0, MPI_COMM_WORLD);
-            assert(ret == MPI_SUCCESS);
-            free(*data);
-            free(send);
-            *data = shirnk;
-        }
-
-        if (rank == proc_num - 1)
-        {
-            pad = m % proc_num;
-            double *recv = malloc((size_t)pad * (size_t)n_part * sizeof(double));
-            double *expand = malloc(((size_t)m_part + (size_t)pad) * (size_t)n_part * sizeof(double));
-            MPI_Status st;
-            int ret = MPI_Recv(recv, pad * n_part, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &st);
-            assert(ret == MPI_SUCCESS);
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_part, n_part, *data, m_part, expand, (m_part + pad));
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', pad, n_part, recv, pad, &(expand[m_part]), (m_part + pad));
-            free(*data);
-            free(recv);
-            *data = expand;
-        }
-    }
+    exchange(m_total, n, m_part, block_num, have1, have2, need1, need2, &mat);
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
@@ -646,7 +701,6 @@ void TSQR(int id, int m_part, int n_part, double **data, double **Y, size_t **Y_
     // }
 }
 
-// TODO:引数にm,nではなくm_part,n_partを与えるようにする（見通しが良くなりそうなので）
 void construct_TSQR_Q(int id, int m_part, int n_part, double *Y, size_t *Y_heads, double *tau, double **Q_ret)
 {
     int k = 0;
@@ -800,9 +854,9 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
     double *data;
     int rank;
     int nrow, ncol, tmp;
-    blacs_gridinfo_(&icontext_1d, &row, &col, &rank, &tmp);
+    blacs_gridinfo_(&icontext_1d, &nrow, &ncol, &rank, &tmp);
     TSQR_init(rank, m, n, A, row, col, &data);
-
+    return;
     id = rank;
     MPI_Barrier(MPI_COMM_WORLD);
     double *Y, *R, *tau;
@@ -1098,7 +1152,6 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
 
 int main(int argc, char **argv)
 {
-    int rank;
 
     // init
     MPI_Init(&argc, &argv);
@@ -1107,6 +1160,7 @@ int main(int argc, char **argv)
         printf("Usage %s matrix_size\n", argv[0]);
         return 0;
     }
+    int rank;
     initBuffer();
     int m, n, k;
     m = atoi(argv[1]);
@@ -1134,25 +1188,24 @@ int main(int argc, char **argv)
     blacs_get_(ADDR(int, 0), ADDR(int, 0), &icontext_1d);
     blacs_gridinit_(&icontext_1d, ADDR(char, 'R'), ADDR(int, proc_row_num *proc_col_num), ADDR(int, 1));
 
-    n = 10;
     // main calc
     // printf("%d %d", m, n);
     if (rank == 0 && print_checkcode)
     {
         printf("import numpy as np\n");
     }
-    Matrix *A = create_matrix(proc_row_num, proc_col_num, m, m, block_row, block_col);
+    n = 2;
+    Matrix *A = create_matrix(proc_row_num, proc_col_num, m, n, block_row, block_col);
     Matrix *T = create_matrix(proc_row_num, proc_col_num, L, m, block_row, block_col);
     Matrix *Y = create_matrix(proc_row_num, proc_col_num, m, m, block_row, block_col);
-    measure_time(for (size_t i = 0; i < A->global_row; ++i)
-                 {
-                     for (size_t j = i; j < A->global_col; ++j)
-                     {
-                         double r = (double)(rand()) / RAND_MAX;
-                         set(A, i, j, r);
-                         set(A, j, i, r);
-                     }
-                 });
+    measure_time(for (size_t i = 0; i < A->global_row; ++i) {
+        for (size_t j = i; j < A->global_col; ++j)
+        {
+            double r = (double)(rand()) / RAND_MAX;
+            set(A, i, j, r);
+            set(A, j, i, r);
+        }
+    });
     blacs_barrier_(&icontext_2d, ADDR(char, 'A'));
     if (print_checkcode)
     {
@@ -1161,38 +1214,38 @@ int main(int argc, char **argv)
         print_matrix("A=", A, rank);
     }
 
-    measure_time(bischof(rank, proc_row_num, proc_col_num, m, L, A, T, Y));
-    if (print_checkcode)
-    {
-        for (int i = 0; i < m; i++)
-        {
-            for (int j = i; j < m; j++)
-            {
-                set(A, i, j, get(A, j, i));
-            }
-        }
+    // measure_time(bischof(rank, proc_row_num, proc_col_num, m, L, A, T, Y));
+    // if (print_checkcode)
+    // {
+    //     for (int i = 0; i < m; i++)
+    //     {
+    //         for (int j = i; j < m; j++)
+    //         {
+    //             set(A, i, j, get(A, j, i));
+    //         }
+    //     }
 
-        for (int i = 0; i < m; i++)
-        {
-            for (int j = 0; j < m; j++)
-            {
-                if (abs(i - j) > L)
-                {
-                    set(A, i, j, 0.0);
-                }
-            }
-        }
-        print_matrix("B=", A, rank);
-        rprintf("\nA = np.matrix(A)\nB = np.matrix(B)\ne=0\nfor i, j in zip(sorted(np.linalg.eigvals(A)), sorted(np.linalg.eigvals(B))):\n    print(i, j)\n    e+=(i-j)**2\n\nprint('error=',e**0.5)\n");
-        // print_matrix("T=", T, rank);
-        // print_matrix("Y=", Y, rank);
-    }
+    //     for (int i = 0; i < m; i++)
+    //     {
+    //         for (int j = 0; j < m; j++)
+    //         {
+    //             if (abs(i - j) > L)
+    //             {
+    //                 set(A, i, j, 0.0);
+    //             }
+    //         }
+    //     }
+    //     print_matrix("B=", A, rank);
+    //     rprintf("\nA = np.matrix(A)\nB = np.matrix(B)\ne=0\nfor i, j in zip(sorted(np.linalg.eigvals(A)), sorted(np.linalg.eigvals(B))):\n    print(i, j)\n    e+=(i-j)**2\n\nprint('error=',e**0.5)\n");
+    //     // print_matrix("T=", T, rank);
+    //     // print_matrix("Y=", Y, rank);
+    // }
 
     MPI_Barrier(MPI_COMM_WORLD);
     // print_matrix("A=", A, rank);
     MPI_Barrier(MPI_COMM_WORLD);
 
-    // TSQR_HR(rank, my_row, my_col, m, n - 3, A, 0, 3, T);
+    TSQR_HR(rank, my_row, my_col, m, n, A, 0, 0, T);
     MPI_Barrier(MPI_COMM_WORLD);
     // print_matrix("ret=", A, rank);
     // print_matrix("T=", T, rank);
