@@ -181,6 +181,14 @@ double get(Matrix *a, int row, int col)
     return val;
 }
 
+double pdlange_(char *norm, int *m, int *n, double *a, int *ia, int *ja, int *desca, double *work);
+
+double pdlange_wrap(Matrix *mat)
+{
+    double *work;
+    return pdlange_(ADDR(char, 'F'), &(mat->global_row), &(mat->global_col), mat->data, ADDR(int, 1), ADDR(int, 1), mat->desc, work);
+}
+
 void print_matrix(char *msg, Matrix *matrix, int rank)
 {
     if (rank == 0)
@@ -1428,9 +1436,11 @@ int main(int argc, char **argv)
             double r = (double)(rand()) / RAND_MAX;
             set(A, i, j, r);
             set(A, j, i, r);
-            // set(A, i, j, j + i * 10);
+            //  set(A, i, j, 1.0);
         }
     });
+    double norm_a = pdlange_wrap(A);
+
     blacs_barrier_(&icontext_2d, ADDR(char, 'A'));
     if (print_checkcode)
     {
@@ -1438,9 +1448,8 @@ int main(int argc, char **argv)
 
         print_matrix("A=", A, rank);
     }
-
     measure_time(bischof(rank, proc_row_num, proc_col_num, m, L, A, T, Y));
-    if (print_checkcode)
+    if (true)
     {
         for (int i = 0; i < m; i++)
         {
@@ -1460,11 +1469,18 @@ int main(int argc, char **argv)
                 }
             }
         }
+    }
+    if (print_checkcode)
+    {
         print_matrix("B=", A, rank);
         rprintf("\nA = np.matrix(A)\nB = np.matrix(B)\ne=0\nfor i, j in zip(sorted(np.linalg.eigvals(A)), sorted(np.linalg.eigvals(B))):\n    print(i, j)\n    e+=(i-j)**2\n\nprint('error=',e**0.5)\n");
         // print_matrix("T=", T, rank);
         // print_matrix("Y=", Y, rank);
     }
+    double norm_b = pdlange_wrap(A);
+
+    rprintf("norm of A = %.18lf\n", norm_a);
+    rprintf("norm of B = %.18lf\n", norm_b);
 
     MPI_Barrier(MPI_COMM_WORLD);
     // print_matrix("A=", A, rank);
