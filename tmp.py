@@ -3,6 +3,8 @@ import random
 
 
 def solve(block_num, proc_num, have1, have2, need1, need2):
+    have1, have2, need1, need2 = need1, need2, have1, have2
+
     send1 = -1
     send2 = -1
     recv1 = -1
@@ -20,6 +22,7 @@ def solve(block_num, proc_num, have1, have2, need1, need2):
         send2 = have2
         if (send2 >= t):
             send2 = (have2-t)//2+t
+    send1, send2, recv1, recv2 = recv1, recv2, send1, send2
     return send1, send2, recv1, recv2
 
 
@@ -39,6 +42,7 @@ def calc_have_need(rank, block_num, proc_num):
     else:
         need1 = 2*(rank - t) + t
         need2 = need1+1
+    have1, have2, need1, need2 = need1, need2, have1, have2
     return have1, have2, need1, need2
 
 

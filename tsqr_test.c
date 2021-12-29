@@ -368,11 +368,10 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
 bool can_TSQR(int m, int n)
 {
     int block_size = m / proc_num;
-    printf("block_size %d, m %d, proc_num %d, m mod proc_num %d\n", block_size, m, proc_num, m % proc_num);
+    // printf("block_size %d, m %d, proc_num %d, m mod proc_num %d\n", block_size, m, proc_num, m % proc_num);
     // rprintf("m %d n %d proc_num %d\n", m, n, proc_num)
 
-    return (m >= proc_num * n) &&
-           (m % proc_num <= block_size);
+    return (m >= proc_num * n);
 }
 
 void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Matrix *T, Matrix *Y)
@@ -404,7 +403,6 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
             measure_time(pdgeqrt_wrap(rank, nproc_row, nproc_col, Nk, L, A, (k + 1) * L, k * L, T_iter));
         }
         measure_time(pdlaset_wrap('L', L, L, 0.0, 0.0, T, 0, L * k));
-
         // print_matrix("A part = ", Nk, L, a_part, lda);
         int pad_row = (k + 1) * L;
         int pad_col = k * L;
@@ -470,15 +468,16 @@ void exchange(int m_total, int n, int m_part, int m_last, int block_num, int hav
     assert(need1 != -1);
     assert(have1 != -1);
     int t = proc_num - (block_num % proc_num);
-    printf("%d\n", m_last);
     int recv1 = -1;
     int recv2 = -1;
     int send1 = -1;
     int send2 = -1;
     int m_recv1 = 0;
     int m_recv2 = 0;
-    double *data_recv1;
-    double *data_recv2;
+    double *data_recv1 = NULL;
+    double *data_recv2 = NULL;
+    double *data_send1 = NULL;
+    double *data_send2 = NULL;
     // set recv
     recv1 = need1 % proc_num;
     if (need2 != -1)
@@ -502,7 +501,7 @@ void exchange(int m_total, int n, int m_part, int m_last, int block_num, int hav
 
     int reqs_idx = 0;
     // send 1
-    double *data_send1 = malloc(m_head * n * sizeof(double));
+    data_send1 = malloc(m_head * n * sizeof(double));
     LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_head, n, mat->data, m_total, data_send1, m_head);
 
     MPI_Isend(data_send1, m_head * n, MPI_DOUBLE, send1, have1, MPI_COMM_WORLD, &reqs[reqs_idx++]);
@@ -514,7 +513,7 @@ void exchange(int m_total, int n, int m_part, int m_last, int block_num, int hav
     // send 2
     if (send2 != -1)
     {
-        double *data_send2 = malloc(m_tail * n * sizeof(double));
+        data_send2 = malloc(m_tail * n * sizeof(double));
         LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_tail, n, &(mat->data[m_head]), m_total, data_send2, m_tail);
         MPI_Isend(data_send2, m_tail * n, MPI_DOUBLE, send2, have2, MPI_COMM_WORLD, &reqs[reqs_idx++]);
     }
@@ -537,9 +536,9 @@ void exchange(int m_total, int n, int m_part, int m_last, int block_num, int hav
 
     if (recv2 == -1)
     {
-        printf("[%d] %p\n", rank, mat->data);
+        // printf("[%d] %p\n", rank, mat->data);
         mat->data = realloc(mat->data, (m_recv1)*n * sizeof(double));
-        printf("[%d] %p\n", rank, mat->data);
+        // printf("[%d] %p\n", rank, mat->data);
         LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv1, n, data_recv1, m_recv1, mat->data, m_recv1);
         mat->global_row = mat->local_row = mat->leading_dimension = m_recv1;
     }
@@ -551,7 +550,180 @@ void exchange(int m_total, int n, int m_part, int m_last, int block_num, int hav
         LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv2, n, data_recv2, m_recv2, &((mat->data)[m_recv1]), m_recv1 + m_recv2);
         mat->global_row = mat->local_row = mat->leading_dimension = m_recv1 + m_recv2;
     }
+    if (data_recv1 != NULL)
+    {
+        free(data_recv1);
+    }
+    if (data_recv2 != NULL)
+    {
+        free(data_recv2);
+    }
+    if (data_send1 != NULL)
+    {
+        free(data_send1);
+    }
+    if (data_send2 != NULL)
+    {
+        free(data_send2);
+    }
 }
+
+// TODO: exchange系を1つにまとめる
+void exchange2(int m_global, int n, int m_local, Matrix *mat, int rank)
+{
+    size_t m_part = m_global / proc_num;
+    size_t block_num = (m_global + m_part - 1) / m_part;
+    int m_head = m_global / proc_num;
+    assert(m_head <= m_local);
+    int m_tail = m_local - m_head;
+    int m_last;
+    if (m_global % m_part == 0)
+    {
+        m_last = m_part;
+    }
+    else
+    {
+        m_last = m_global % m_part;
+    }
+    int have1 = -1;
+    int have2 = -1;
+    int need1 = -1;
+    int need2 = -1;
+
+    int t = proc_num - (block_num % proc_num);
+
+    if (rank < t)
+    {
+        have1 = rank;
+    }
+    else
+    {
+        have1 = 2 * (rank - t) + t;
+        have2 = have1 + 1;
+    }
+
+    if (rank < block_num % proc_num)
+    {
+        need1 = rank;
+        need2 = proc_num + rank;
+    }
+    else
+    {
+        need1 = rank;
+    }
+
+    int recv1 = -1;
+    int recv2 = -1;
+    int send1 = -1;
+    int send2 = -1;
+    int m_recv1 = 0;
+    int m_recv2 = 0;
+    double *data_recv1 = NULL;
+    double *data_recv2 = NULL;
+    double *data_send1 = NULL;
+    double *data_send2 = NULL;
+
+    // set recv
+    if (need1 < t)
+    {
+        recv1 = need1;
+    }
+    else
+    {
+        recv1 = (need1 - t) / 2 + t;
+    }
+    if (need2 != -1)
+    {
+        if (need2 < t)
+        {
+            recv2 = need2;
+        }
+        else
+        {
+            recv2 = (need2 - t) / 2 + t;
+        }
+    }
+
+    send1 = have1 % proc_num;
+    if (have2 != -1)
+    {
+        send2 = have2 % proc_num;
+    }
+    // printf("status [%d] %d %d %d %d\n", rank, send1, send2, recv1, recv2);
+    // printf("have/need [%d] %d %d %d %d\n", rank, have1, have2, need1, need2);
+    // printf("send   [%d] %d %d\n", rank, m_head, m_tail);
+
+    MPI_Request reqs[4];
+
+    int reqs_idx = 0;
+    // send 1
+    data_send1 = malloc(m_head * n * sizeof(double));
+    LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_head, n, mat->data, m_local, data_send1, m_head);
+
+    MPI_Isend(data_send1, m_head * n, MPI_DOUBLE, send1, have1, MPI_COMM_WORLD, &reqs[reqs_idx++]);
+    //  recv 1
+    m_recv1 = (need1 == block_num - 1) ? m_last : m_part;
+    data_recv1 = malloc(m_recv1 * n * sizeof(double));
+    MPI_Irecv(data_recv1, m_recv1 * n, MPI_DOUBLE, recv1, need1, MPI_COMM_WORLD, &reqs[reqs_idx++]);
+
+    // send 2
+    if (send2 != -1)
+    {
+        data_send2 = malloc(m_tail * n * sizeof(double));
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_tail, n, &(mat->data[m_head]), m_local, data_send2, m_tail);
+        MPI_Isend(data_send2, m_tail * n, MPI_DOUBLE, send2, have2, MPI_COMM_WORLD, &reqs[reqs_idx++]);
+    }
+
+    // recv 2
+    if (recv2 != -1)
+    {
+        m_recv2 = (need2 == block_num - 1) ? m_last : m_part;
+        data_recv2 = malloc(m_recv2 * n * sizeof(double));
+        MPI_Irecv(data_recv2, m_recv2 * n, MPI_DOUBLE, recv2, need2, MPI_COMM_WORLD, &reqs[reqs_idx++]);
+        // printf("recv   [%d] %d \n", rank, m_recv2);
+        // printf("mlast   [%d] %d\n", rank, (need2 == block_num - 1) ? m_last : m_part);
+    }
+
+    for (int i = 0; i < reqs_idx; i++)
+    {
+        MPI_Status st;
+        MPI_Wait(&reqs[i], &st);
+    }
+
+    if (recv2 == -1)
+    {
+        // printf("[%d] %p\n", rank, mat->data);
+        mat->data = realloc(mat->data, (m_recv1)*n * sizeof(double));
+        // printf("[%d] %p\n", rank, mat->data);
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv1, n, data_recv1, m_recv1, mat->data, m_recv1);
+        mat->global_row = mat->local_row = mat->leading_dimension = m_recv1;
+    }
+    else
+    {
+        mat->data = realloc(mat->data, (m_recv1 + m_recv2) * n * sizeof(double));
+
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv1, n, data_recv1, m_recv1, mat->data, m_recv1 + m_recv2);
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv2, n, data_recv2, m_recv2, &((mat->data)[m_recv1]), m_recv1 + m_recv2);
+        mat->global_row = mat->local_row = mat->leading_dimension = m_recv1 + m_recv2;
+    }
+    if (data_recv1 != NULL)
+    {
+        free(data_recv1);
+    }
+    if (data_recv2 != NULL)
+    {
+        free(data_recv2);
+    }
+    if (data_send1 != NULL)
+    {
+        free(data_send1);
+    }
+    if (data_send2 != NULL)
+    {
+        free(data_send2);
+    }
+}
+
 void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double **data, int *m_ret)
 {
 
@@ -600,11 +772,11 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
     int m_total = numroc_(&m, &m_part, &rank, ADDR(int, 0), &proc_num);
     // printf("[%d] descinit 3 %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_total);
     descinit_(desc, ADDR(int, m), ADDR(int, n), &m_part, &n, ADDR(int, 0), ADDR(int, 0), &icontext_1d, &m_total, &ierror);
-    printf("[%d] done 3 %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_total);
+    // printf("[%d] done 3 %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_total);
     Matrix mat;
     mat.desc = desc;
     mat.data = malloc(((size_t)m_total) * (size_t)n_part * sizeof(double));
-    printf("[%d] %d %d %d %d\n", rank, m, n, row, col);
+    // printf("[%d] %d %d %d %d\n", rank, m, n, row, col);
     pdgemr2d_wrap(m, n, matrix, row, col, &mat, 0, 0);
     int m_last;
     if (m % m_part == 0)
@@ -622,7 +794,6 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
 }
 
 // TODO:冗長な二重ポインタを取り除く
-// TODO:引数にm,nではなくm_part,n_partを与えるようにする（見通しが良くなりそうなので）
 void TSQR(int id, int m_part, int n_part, double **data, double **Y, size_t **Y_heads, double **R, double **tau)
 {
     MPI_Barrier(MPI_COMM_WORLD);
@@ -873,42 +1044,42 @@ void modified_LU_decomposition(int id, int m_part, int n_part, double *Y, double
 
 void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix *A, int row, int col, Matrix *T_ret)
 {
+    // print_matrix("A=", A, rank_2d);
     int id;
     double *data;
     int rank;
     int nrow, ncol, tmp;
     blacs_gridinfo_(&icontext_1d, &nrow, &ncol, &rank, &tmp);
-    int m_part;
-    TSQR_init(rank, m, n, A, row, col, &data, &m_part);
+    int m_local;
+    TSQR_init(rank, m, n, A, row, col, &data, &m_local);
 
     MPI_Barrier(MPI_COMM_WORLD);
-    for (int p = 0; p < proc_num; p++)
-    {
-        if (p == rank)
-        {
-            // printf("#p = %d\n", id);
-            for (int i = 0; i < m_part; i++)
-            {
-                printf("[");
-                fflush(stdout);
-                for (int j = 0; j < n; j++)
-                {
-                    printf("%lf ,", data[j * m_part + i]);
-                    fflush(stdout);
-                }
-                printf("],\n");
-                fflush(stdout);
-            }
-        }
-        else
-        {
-            // MPI_Barrierはfflushではprintfの出力順を指定できないので，sleep(1)で無理やり出力を安定させる
-            usleep(1000 * 100);
-        }
-        MPI_Barrier(MPI_COMM_WORLD);
-        // blacs_barrier_(&icontext, ADDR(char, 'A'));
-    }
-    return;
+    // for (int p = 0; p < proc_num; p++)
+    // {
+    //     if (p == rank)
+    //     {
+    //         // printf("#p = %d\n", id);
+    //         for (int i = 0; i < m_part; i++)
+    //         {
+    //             printf("[");
+    //             fflush(stdout);
+    //             for (int j = 0; j < n; j++)
+    //             {
+    //                 printf("%lf ,", data[j * m_part + i]);
+    //                 fflush(stdout);
+    //             }
+    //             printf("],\n");
+    //             fflush(stdout);
+    //         }
+    //     }
+    //     else
+    //     {
+    //         // MPI_Barrierはfflushではprintfの出力順を指定できないので，sleepで無理やり出力を安定させる
+    //         usleep(1000 * 100);
+    //     }
+    //     MPI_Barrier(MPI_COMM_WORLD);
+    //     // blacs_barrier_(&icontext, ADDR(char, 'A'));
+    // }
     id = rank;
     MPI_Barrier(MPI_COMM_WORLD);
     double *Y, *R, *tau;
@@ -920,7 +1091,7 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
     //    }
 
     int n_part = n;
-    TSQR(id, m_part, n_part, &data, &Y, &Y_heads, &R, &tau);
+    TSQR(id, m_local, n_part, &data, &Y, &Y_heads, &R, &tau);
 
     // assert(m % proc_num == 0);
     MPI_Barrier(MPI_COMM_WORLD);
@@ -941,7 +1112,7 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
     // }
 
     double *Q;
-    construct_TSQR_Q(id, m_part, n_part, Y, Y_heads, tau, &Q);
+    construct_TSQR_Q(id, m_local, n_part, Y, Y_heads, tau, &Q);
     // if (id == 0)
     //     printf("Q=[\n");
     // MPI_Barrier(MPI_COMM_WORLD);
@@ -950,13 +1121,13 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
     //     if (p == id)
     //     {
     //         // printf("#p = %d\n", id);
-    //         for (int i = 0; i < m / proc_num; i++)
+    //         for (int i = 0; i < m_part; i++)
     //         {
     //             printf("[");
     //             fflush(stdout);
     //             for (int j = 0; j < n; j++)
     //             {
-    //                 printf("%.18lf ,", Q[j * m / proc_num + i]);
+    //                 printf("%.18lf ,", Q[j * m_part + i]);
     //                 fflush(stdout);
     //             }
     //             printf("],\n");
@@ -966,17 +1137,17 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
     //     else
     //     {
     //         // MPI_Barrierはfflushではprintfの出力順を指定できないので，sleep(1)で無理やり出力を安定させる
-    //         sleep(1);
+    //         usleep(1000 * 100);
     //     }
     //     MPI_Barrier(MPI_COMM_WORLD);
     //     // blacs_barrier_(&icontext, ADDR(char, 'A'));
     // }
     // if (id == 0)
     //     printf("]\n");
-    MPI_Barrier(MPI_COMM_WORLD);
 
+    MPI_Barrier(MPI_COMM_WORLD);
     double *S; // = malloc(n * sizeof(double));
-    modified_LU_decomposition(id, m_part, n, Q, &S);
+    modified_LU_decomposition(id, m_local, n, Q, &S);
 
     double *T;
     if (id == 0)
@@ -984,8 +1155,8 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
 
         double *SY1 = calloc(n * n, sizeof(double));
         T = calloc(n * n, sizeof(double));
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'L', n, n, Q, m_part, SY1, n);
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n, n, Q, m_part, T, n);
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'L', n, n, Q, m_local, SY1, n);
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n, n, Q, m_local, T, n);
 
         LAPACKE_dtrtri(LAPACK_COL_MAJOR, 'L', 'U', n, SY1, n);
         for (int i = 0; i < n; i++)
@@ -999,7 +1170,7 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
 
         cblas_dtrmm(CblasColMajor, CblasRight, CblasLower, CblasTrans, CblasUnit, n, n, -1.0, SY1, n, T, n);
         free(SY1);
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n, n, R, n, Q, m_part);
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n, n, R, n, Q, m_local);
     }
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -1041,44 +1212,44 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
 
     //     printf("]\n");
     // }
-    int pad = 0;
-    if (m % proc_num != 0)
-    {
+    // int pad = 0;
+    // if (m % proc_num != 0)
+    // {
 
-        if (id == proc_num - 1)
-        {
-            pad = m % proc_num;
+    //     if (id == proc_num - 1)
+    //     {
+    //         pad = m % proc_num;
 
-            double *send = malloc(pad * n_part * sizeof(double));
-            double *shirnk = malloc((m_part - pad) * n_part * sizeof(double));
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_part - pad, n_part, Q, m_part, shirnk, m_part - pad);
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', pad, n_part, &(Q[m_part - pad]), m_part, send, pad);
-            int ret = MPI_Send(send, pad * n_part, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
-            assert(ret == MPI_SUCCESS);
-            free(send);
-            free(Q);
-            Q = shirnk;
-            m_part -= pad;
-            pad = 0;
-        }
+    //         double *send = malloc(pad * n_part * sizeof(double));
+    //         double *shirnk = malloc((m_part - pad) * n_part * sizeof(double));
+    //         LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_part - pad, n_part, Q, m_part, shirnk, m_part - pad);
+    //         LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', pad, n_part, &(Q[m_part - pad]), m_part, send, pad);
+    //         int ret = MPI_Send(send, pad * n_part, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+    //         assert(ret == MPI_SUCCESS);
+    //         free(send);
+    //         free(Q);
+    //         Q = shirnk;
+    //         m_part -= pad;
+    //         pad = 0;
+    //     }
 
-        if (id == 0)
-        {
-            pad = m % proc_num;
+    //     if (id == 0)
+    //     {
+    //         pad = m % proc_num;
 
-            double *recv = malloc(pad * n_part * sizeof(double));
-            double *expand = malloc((m_part + pad) * n_part * sizeof(double));
-            MPI_Status st;
-            int ret = MPI_Recv(recv, pad * n_part, MPI_DOUBLE, proc_num - 1, 0, MPI_COMM_WORLD, &st);
-            assert(ret == MPI_SUCCESS);
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_part, n_part, Q, m_part, expand, (m_part + pad));
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', pad, n_part, recv, pad, &(expand[m_part]), (m_part + pad));
-            free(Q);
-            free(recv);
-            Q = expand;
-            //  m_part += pad;
-        }
-    }
+    //         double *recv = malloc(pad * n_part * sizeof(double));
+    //         double *expand = malloc((m_part + pad) * n_part * sizeof(double));
+    //         MPI_Status st;
+    //         int ret = MPI_Recv(recv, pad * n_part, MPI_DOUBLE, proc_num - 1, 0, MPI_COMM_WORLD, &st);
+    //         assert(ret == MPI_SUCCESS);
+    //         LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_part, n_part, Q, m_part, expand, (m_part + pad));
+    //         LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', pad, n_part, recv, pad, &(expand[m_part]), (m_part + pad));
+    //         free(Q);
+    //         free(recv);
+    //         Q = expand;
+    //         //  m_part += pad;
+    //     }
+    // }
 
     // if (id == 0)
     // {
@@ -1177,25 +1348,26 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
 
     int desc[DESC_LEN];
     int ierror;
-    // printf("[%d] m_part %d\n", id, m_part);
-    // printf("[%d] pad %d\n", id, pad);
-    printf("[%d] descinit 1 %d %d %d %d %d %d\n", rank, m, n, m_part, n, icontext_1d, m_part + pad);
-    descinit_(&desc, ADDR(int, m),
-              ADDR(int, n), ADDR(int, m_part), ADDR(int, n), ADDR(int, 0), ADDR(int, 0), &icontext_1d, ADDR(int, m_part + pad), &ierror);
-    printf("[%d] done 1 %d %d %d %d %d %d\n", rank, m, n, m_part, n, icontext_1d, m_part + pad);
     Matrix mat;
     mat.data = Q;
+    exchange2(m, n, m_local, &mat, id);
+    int ld = numroc_(&m, ADDR(int, m / proc_num), &rank, ADDR(int, 0), &proc_num);
+
+    descinit_(&desc, ADDR(int, m),
+              ADDR(int, n), ADDR(int, m / proc_num), ADDR(int, n), ADDR(int, 0), ADDR(int, 0), &icontext_1d, ADDR(int, ld), &ierror);
     mat.desc = desc;
+
     pdgemr2d_wrap(m, n, &mat, 0, 0, A, row, col);
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    printf("[%d] descinit 2 %d %d %d %d %d %d\n", rank, n, n, n, n, icontext_1d, n);
+    // printf("[%d] descinit 2 %d %d %d %d %d %d\n", rank, n, n, n, n, icontext_1d, n);
     descinit_(&desc, ADDR(int, n),
               ADDR(int, n), ADDR(int, n), ADDR(int, n), ADDR(int, 0), ADDR(int, 0), &icontext_1d, ADDR(int, n), &ierror);
-    printf("[%d] done 2 %d %d %d %d %d %d\n", rank, n, n, n, n, icontext_1d, n);
+    // printf("[%d] done 2 %d %d %d %d %d %d\n", rank, n, n, n, n, icontext_1d, n);
     mat.data = T;
     mat.desc = desc;
+
     pdgemr2d_wrap(n, n, &mat, 0, 0, T_ret, 0, 0);
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -1223,7 +1395,7 @@ int main(int argc, char **argv)
     srand(random_seed);
 
     int nproc, dims[2], ierror;
-    int L = 32;
+    int L = 2;
 
     blacs_pinfo_(&rank, &nproc);
     proc_num = nproc;
@@ -1246,16 +1418,17 @@ int main(int argc, char **argv)
     {
         printf("import numpy as np\n");
     }
-    n = 2;
-    Matrix *A = create_matrix(proc_row_num, proc_col_num, m, n, block_row, block_col);
+    n = 4;
+    Matrix *A = create_matrix(proc_row_num, proc_col_num, m, m, block_row, block_col);
     Matrix *T = create_matrix(proc_row_num, proc_col_num, L, m, block_row, block_col);
     Matrix *Y = create_matrix(proc_row_num, proc_col_num, m, m, block_row, block_col);
     measure_time(for (size_t i = 0; i < A->global_row; ++i) {
         for (size_t j = 0; j < A->global_col; ++j)
         {
             double r = (double)(rand()) / RAND_MAX;
-            set(A, i, j, j + i * 10);
-            // set(A, j, i, r);
+            set(A, i, j, r);
+            set(A, j, i, r);
+            // set(A, i, j, j + i * 10);
         }
     });
     blacs_barrier_(&icontext_2d, ADDR(char, 'A'));
@@ -1266,38 +1439,38 @@ int main(int argc, char **argv)
         print_matrix("A=", A, rank);
     }
 
-    // measure_time(bischof(rank, proc_row_num, proc_col_num, m, L, A, T, Y));
-    // if (print_checkcode)
-    // {
-    //     for (int i = 0; i < m; i++)
-    //     {
-    //         for (int j = i; j < m; j++)
-    //         {
-    //             set(A, i, j, get(A, j, i));
-    //         }
-    //     }
+    measure_time(bischof(rank, proc_row_num, proc_col_num, m, L, A, T, Y));
+    if (print_checkcode)
+    {
+        for (int i = 0; i < m; i++)
+        {
+            for (int j = i; j < m; j++)
+            {
+                set(A, i, j, get(A, j, i));
+            }
+        }
 
-    //     for (int i = 0; i < m; i++)
-    //     {
-    //         for (int j = 0; j < m; j++)
-    //         {
-    //             if (abs(i - j) > L)
-    //             {
-    //                 set(A, i, j, 0.0);
-    //             }
-    //         }
-    //     }
-    //     print_matrix("B=", A, rank);
-    //     rprintf("\nA = np.matrix(A)\nB = np.matrix(B)\ne=0\nfor i, j in zip(sorted(np.linalg.eigvals(A)), sorted(np.linalg.eigvals(B))):\n    print(i, j)\n    e+=(i-j)**2\n\nprint('error=',e**0.5)\n");
-    //     // print_matrix("T=", T, rank);
-    //     // print_matrix("Y=", Y, rank);
-    // }
+        for (int i = 0; i < m; i++)
+        {
+            for (int j = 0; j < m; j++)
+            {
+                if (abs(i - j) > L)
+                {
+                    set(A, i, j, 0.0);
+                }
+            }
+        }
+        print_matrix("B=", A, rank);
+        rprintf("\nA = np.matrix(A)\nB = np.matrix(B)\ne=0\nfor i, j in zip(sorted(np.linalg.eigvals(A)), sorted(np.linalg.eigvals(B))):\n    print(i, j)\n    e+=(i-j)**2\n\nprint('error=',e**0.5)\n");
+        // print_matrix("T=", T, rank);
+        // print_matrix("Y=", Y, rank);
+    }
 
     MPI_Barrier(MPI_COMM_WORLD);
     // print_matrix("A=", A, rank);
     MPI_Barrier(MPI_COMM_WORLD);
 
-    TSQR_HR(rank, my_row, my_col, m, n, A, 0, 0, T);
+    // TSQR_HR(rank, my_row, my_col, m, n, A, 0, 0, T);
     MPI_Barrier(MPI_COMM_WORLD);
     // print_matrix("ret=", A, rank);
     // print_matrix("T=", T, rank);
