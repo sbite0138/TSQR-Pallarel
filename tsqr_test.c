@@ -1403,7 +1403,7 @@ int main(int argc, char **argv)
     srand(random_seed);
 
     int nproc, dims[2], ierror;
-    int L = 2;
+    int L = 32;
 
     blacs_pinfo_(&rank, &nproc);
     proc_num = nproc;

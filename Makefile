@@ -8,7 +8,7 @@ endif
 endif
 OPENBLAS_DIR = ./OpenBLAS-0.3.13
 
-all: tsqr_test bischof qrprec parallel
+all: band_parallel
 
 
 tsqr_test: tsqr_test.c
@@ -23,6 +23,9 @@ qrprec: qrprec.c
 parallel: bischof_parallel.c
 	 mpicc bischof_parallel.c -L'/home/sbite/github/scalapack-2.1.0/lib' -lscalapack -llapack -lgfortran  -fopenmp  -g -std=c11  -o $@
 
+
+band_parallel: code.c
+	mpicc  $< -lm -L'/home/sbite/github/scalapack-2.1.0/lib' -lscalapack -lopenblas -llapacke -llapack -lgfortran -g -fopenmp  -std=c11  -o $@
 
 clean:
 	rm -f qrprec

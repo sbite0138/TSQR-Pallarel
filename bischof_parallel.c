@@ -446,15 +446,14 @@ int main(int argc, char **argv)
 
     // Matrix *R = create_matrix(nproc_row, nproc_col, m, n, block_row, block_col);
 
-    measure_time(for (size_t i = 0; i < A->global_row; ++i)
-                 {
-                     for (size_t j = i; j < A->global_col; ++j)
-                     {
-                         double r = (double)(rand()) / RAND_MAX;
-                         set(A, i, j, r);
-                         set(A, j, i, r);
-                     }
-                 });
+    measure_time(for (size_t i = 0; i < A->global_row; ++i) {
+        for (size_t j = i; j < A->global_col; ++j)
+        {
+            double r = (double)(rand()) / RAND_MAX;
+            set(A, i, j, r);
+            set(A, j, i, r);
+        }
+    });
     blacs_barrier_(&icontext_2d, ADDR(char, 'A'));
     if (print_checkcode)
     {
