@@ -475,6 +475,10 @@ void exchange(int m_total, int n, int m_part, int m_last, int block_num, int hav
     int recv2 = -1;
     int send1 = -1;
     int send2 = -1;
+    int m_recv1 = 0;
+    int m_recv2 = 0;
+    double *data_recv1;
+    double *data_recv2;
     // set recv
     recv1 = need1 % proc_num;
     if (need2 != -1)
@@ -490,8 +494,9 @@ void exchange(int m_total, int n, int m_part, int m_last, int block_num, int hav
         if (send2 >= t)
             send2 = (have2 - t) / 2 + t;
     }
-    printf("status [%d] %d %d %d %d\n", rank, send1, send2, recv1, recv2);
-    printf("send   [%d] %d %d\n", rank, m_head, m_tail);
+    // printf("status [%d] %d %d %d %d\n", rank, send1, send2, recv1, recv2);
+    // printf("have/need [%d] %d %d %d %d\n", rank, have1, have2, need1, need2);
+    // printf("send   [%d] %d %d\n", rank, m_head, m_tail);
 
     MPI_Request reqs[4];
 
@@ -502,36 +507,52 @@ void exchange(int m_total, int n, int m_part, int m_last, int block_num, int hav
 
     MPI_Isend(data_send1, m_head * n, MPI_DOUBLE, send1, have1, MPI_COMM_WORLD, &reqs[reqs_idx++]);
     //  recv 1
-    int m_recv1 = (need1 == block_num - 1) ? m_last : m_part;
-    double *data_recv1 = malloc(m_recv1 * n * sizeof(double));
+    m_recv1 = (need1 == block_num - 1) ? m_last : m_part;
+    data_recv1 = malloc(m_recv1 * n * sizeof(double));
     MPI_Irecv(data_recv1, m_recv1 * n, MPI_DOUBLE, recv1, need1, MPI_COMM_WORLD, &reqs[reqs_idx++]);
 
     // send 2
     if (send2 != -1)
     {
         double *data_send2 = malloc(m_tail * n * sizeof(double));
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_tail, n, mat->data, m_total, data_send2, m_tail);
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_tail, n, &(mat->data[m_head]), m_total, data_send2, m_tail);
         MPI_Isend(data_send2, m_tail * n, MPI_DOUBLE, send2, have2, MPI_COMM_WORLD, &reqs[reqs_idx++]);
     }
 
     // recv 2
     if (recv2 != -1)
     {
-        int m_recv2 = (need2 == block_num - 1) ? m_last : m_part;
-        double *data_recv2 = malloc(m_recv2 * n * sizeof(double));
+        m_recv2 = (need2 == block_num - 1) ? m_last : m_part;
+        data_recv2 = malloc(m_recv2 * n * sizeof(double));
         MPI_Irecv(data_recv2, m_recv2 * n, MPI_DOUBLE, recv2, need2, MPI_COMM_WORLD, &reqs[reqs_idx++]);
-        printf("recv   [%d] %d \n", rank, m_recv2);
-        printf("mlast   [%d] %d\n", rank, (need2 == block_num - 1) ? m_last : m_part);
+        // printf("recv   [%d] %d \n", rank, m_recv2);
+        // printf("mlast   [%d] %d\n", rank, (need2 == block_num - 1) ? m_last : m_part);
     }
 
     for (int i = 0; i < reqs_idx; i++)
     {
-
         MPI_Status st;
         MPI_Wait(&reqs[i], &st);
     }
+
+    if (recv2 == -1)
+    {
+        printf("[%d] %p\n", rank, mat->data);
+        mat->data = realloc(mat->data, (m_recv1)*n * sizeof(double));
+        printf("[%d] %p\n", rank, mat->data);
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv1, n, data_recv1, m_recv1, mat->data, m_recv1);
+        mat->global_row = mat->local_row = mat->leading_dimension = m_recv1;
+    }
+    else
+    {
+        mat->data = realloc(mat->data, (m_recv1 + m_recv2) * n * sizeof(double));
+
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv1, n, data_recv1, m_recv1, mat->data, m_recv1 + m_recv2);
+        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv2, n, data_recv2, m_recv2, &((mat->data)[m_recv1]), m_recv1 + m_recv2);
+        mat->global_row = mat->local_row = mat->leading_dimension = m_recv1 + m_recv2;
+    }
 }
-void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double **data)
+void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double **data, int *m_ret)
 {
 
     assert(is_power_of_2(proc_num));
@@ -585,7 +606,6 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
     mat.data = malloc(((size_t)m_total) * (size_t)n_part * sizeof(double));
     printf("[%d] %d %d %d %d\n", rank, m, n, row, col);
     pdgemr2d_wrap(m, n, matrix, row, col, &mat, 0, 0);
-    *data = mat.data;
     int m_last;
     if (m % m_part == 0)
     {
@@ -597,6 +617,8 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
     }
     exchange(m_total, n, m_part, m_last, block_num, have1, have2, need1, need2, &mat, rank);
     MPI_Barrier(MPI_COMM_WORLD);
+    *data = mat.data;
+    *m_ret = mat.global_row;
 }
 
 // TODO:冗長な二重ポインタを取り除く
@@ -856,18 +878,46 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
     int rank;
     int nrow, ncol, tmp;
     blacs_gridinfo_(&icontext_1d, &nrow, &ncol, &rank, &tmp);
+    int m_part;
+    TSQR_init(rank, m, n, A, row, col, &data, &m_part);
 
-    TSQR_init(rank, m, n, A, row, col, &data);
+    MPI_Barrier(MPI_COMM_WORLD);
+    for (int p = 0; p < proc_num; p++)
+    {
+        if (p == rank)
+        {
+            // printf("#p = %d\n", id);
+            for (int i = 0; i < m_part; i++)
+            {
+                printf("[");
+                fflush(stdout);
+                for (int j = 0; j < n; j++)
+                {
+                    printf("%lf ,", data[j * m_part + i]);
+                    fflush(stdout);
+                }
+                printf("],\n");
+                fflush(stdout);
+            }
+        }
+        else
+        {
+            // MPI_Barrierはfflushではprintfの出力順を指定できないので，sleep(1)で無理やり出力を安定させる
+            usleep(1000 * 100);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+        // blacs_barrier_(&icontext, ADDR(char, 'A'));
+    }
     return;
     id = rank;
     MPI_Barrier(MPI_COMM_WORLD);
     double *Y, *R, *tau;
     size_t *Y_heads;
-    int m_part = m / proc_num;
-    if (rank == proc_num - 1)
-    {
-        m_part += m % proc_num;
-    }
+    // int m_part = m / proc_num;
+    // if (rank == proc_num - 1)
+    // {
+    //     m_part += m % proc_num;
+    //    }
 
     int n_part = n;
     TSQR(id, m_part, n_part, &data, &Y, &Y_heads, &R, &tau);
@@ -1201,11 +1251,11 @@ int main(int argc, char **argv)
     Matrix *T = create_matrix(proc_row_num, proc_col_num, L, m, block_row, block_col);
     Matrix *Y = create_matrix(proc_row_num, proc_col_num, m, m, block_row, block_col);
     measure_time(for (size_t i = 0; i < A->global_row; ++i) {
-        for (size_t j = i; j < A->global_col; ++j)
+        for (size_t j = 0; j < A->global_col; ++j)
         {
             double r = (double)(rand()) / RAND_MAX;
-            set(A, i, j, r);
-            set(A, j, i, r);
+            set(A, i, j, j + i * 10);
+            // set(A, j, i, r);
         }
     });
     blacs_barrier_(&icontext_2d, ADDR(char, 'A'));
