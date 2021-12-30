@@ -106,30 +106,6 @@ typedef struct
     size_t leading_dimension;
 } Matrix;
 
-typedef struct
-{
-    double *data;
-    size_t row;
-    size_t col;
-    size_t leading_dimension;
-} LocalMatrix;
-
-LocalMatrix *create_local_matrix(size_t row, size_t col)
-{
-    LocalMatrix *lmat = malloc(sizeof(LocalMatrix));
-    lmat->row = row;
-    lmat->col = col;
-    lmat->leading_dimension = row;
-    lmat->data = malloc(lmat->leading_dimension * lmat->col * sizeof(double));
-    return lmat;
-}
-
-void free_local_matrix(LocalMatrix *lmat)
-{
-    free(lmat->data);
-    free(lmat);
-}
-
 int min(int a, int b)
 {
     return (a < b ? a : b);
@@ -313,6 +289,12 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
 
     tau = malloc(((size_t)n + (size_t)col) * sizeof(double));
     measure_time(pdgeqrf_wrap(m, n, matrix, row, col, tau));
+    // double *work = malloc(n * (n - 1) / 2);
+
+    // pdlarft_(ADDR(char, 'F'), ADDR(char, 'C'), ADDR(int, 1),
+    //          ADDR(int, n), matrix->data, ADDR(int, row + 1), ADDR(int, col + 1), matrix->desc, tau, T->data, work);
+    // free(work);
+    // return;
     int desc[9];
     desc[0] = 1;
     desc[1] = matrix->desc[1];
@@ -411,6 +393,7 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
             measure_time(pdgeqrt_wrap(rank, nproc_row, nproc_col, Nk, L, A, (k + 1) * L, k * L, T_iter));
         }
         measure_time(pdlaset_wrap('L', L, L, 0.0, 0.0, T, 0, L * k));
+        measure_time(pdgemr2d_wrap(L, L, T_iter, 0, 0, T, 0, L * k));
         // print_matrix("A part = ", Nk, L, a_part, lda);
         int pad_row = (k + 1) * L;
         int pad_col = k * L;
@@ -1223,12 +1206,12 @@ int main(int argc, char **argv)
     blacs_gridinit_(&icontext_1d, ADDR(char, 'R'), ADDR(int, proc_row_num *proc_col_num), ADDR(int, 1));
     if (argv[3][0] == 't')
     {
-        rprintf("use_tsqr\n");
+        rprintf("# use_tsqr\n");
         use_tsqr = true;
     }
     else
     {
-        rprintf("use householder\n");
+        rprintf("# use householder\n");
         use_tsqr = false;
     }
 
@@ -1286,13 +1269,24 @@ int main(int argc, char **argv)
     {
         print_matrix("B=", A, rank);
         rprintf("\nA = np.matrix(A)\nB = np.matrix(B)\ne=0\nfor i, j in zip(sorted(np.linalg.eigvals(A)), sorted(np.linalg.eigvals(B))):\n    print(i, j)\n    e+=(i-j)**2\n\nprint('error=',e**0.5)\n");
-        // print_matrix("T=", T, rank);
-        // print_matrix("Y=", Y, rank);
+        print_matrix("T=", T, rank);
+        print_matrix("Y=", Y, rank);
+        rprintf("L = %d\n", L);
+        rprintf("N = %d\n", m);
+        rprintf("T=np.matrix(T)\n");
+        rprintf("Y=np.matrix(Y)\n");
+        rprintf("assert(N%%L==0)\n");
+        rprintf("for i in range(N//L-1):\n");
+        rprintf("    t=T[:L,L*i:L*(i+1)]\n");
+        rprintf("    y=Y[:N-L*(i+1),L*i:L*(i+1)]\n");
+        rprintf("    q=y*t*y.T\n");
+        rprintf("    q=np.eye(q.shape[0])-q\n");
+        rprintf("    print(np.linalg.norm(np.eye(q.shape[0])-q*q.T))\n");
     }
     double norm_b = pdlange_wrap(A);
 
-    rprintf("norm of A = %.18lf\n", norm_a);
-    rprintf("norm of B = %.18lf\n", norm_b);
+    rprintf("# norm of A = %.18lf\n", norm_a);
+    rprintf("# norm of B = %.18lf\n", norm_b);
 
     MPI_Barrier(MPI_COMM_WORLD);
     // print_matrix("A=", A, rank);
