@@ -25,7 +25,7 @@ parallel: bischof_parallel.c
 
 
 band_parallel: code.c
-	mpicc  $< -lm -L'/home/sbite/github/scalapack-2.1.0/lib' -lscalapack -lopenblas -llapacke -llapack -lgfortran -g -fopenmp  -std=c11  -o $@
+	mpicc  $< -lm -L'/home/sbite/github/scalapack-2.1.0/lib' -lscalapack -lopenblas -llapacke -llapack -lgfortran -g -DDEBUG -fopenmp  -std=c11  -o $@
 
 clean:
 	rm -f qrprec

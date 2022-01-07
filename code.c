@@ -1,7 +1,10 @@
 #include <assert.h>
-//#include <mkl.h>
+#ifdef DEBUG
 #include <cblas.h>
 #include <lapacke.h>
+#else
+#include <mkl.h>
+#endif
 #include <mpi.h>
 #include <omp.h> // for a timing routine.
 #include <stdarg.h>
@@ -27,6 +30,8 @@
 #define measure_time(x)                                                                                                                            \
     do                                                                                                                                             \
     {                                                                                                                                              \
+        if (print_checkcode == false)                                                                                                              \
+            rprintf("# enter %d\n", __LINE__);                                                                                                     \
         level++;                                                                                                                                   \
         double start = omp_get_wtime();                                                                                                            \
         {                                                                                                                                          \
@@ -36,6 +41,8 @@
         level--;                                                                                                                                   \
         if (print_checkcode == false)                                                                                                              \
             rprintf("@ {\"rank\":%d,\"level\":%d, \"line\":%d, \"cmd\":\"%s\", \"time\":%.18f}\n", rank_global, level, __LINE__, #x, end - start); \
+        if (print_checkcode == false)                                                                                                              \
+            rprintf("# exit %d\n", __LINE__);                                                                                                      \
     } while (0)
 #define append(vec, vec_size, val)                           \
     do                                                       \
@@ -72,7 +79,7 @@ void sbprintf(const char *fmt, ...)
     {
         sBuffer.size *= 2;
         sBuffer.buf = realloc(sBuffer.buf, sBuffer.size * sizeof(char));
-        fprintf(stderr, "realloced!\n");
+        fprintf(stderr, "realloced! %d\n", sBuffer.size);
     }
 }
 void dumpBuffer()
@@ -287,7 +294,7 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
     assert(T->global_col >= n);
     double *tau;
 
-    tau = malloc(((size_t)n + (size_t)col) * sizeof(double));
+    measure_time(tau = malloc(((size_t)n + (size_t)col) * sizeof(double)));
     measure_time(pdgeqrf_wrap(m, n, matrix, row, col, tau));
     // double *work = malloc(n * (n - 1) / 2);
 
@@ -308,25 +315,25 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
     double val;
     Matrix *Y;
 
-    Y = create_matrix(proc_row, proc_col, m, n, block_row, block_col);
-    pdlaset_wrap('A', T->global_row, T->global_col, 0.0, 0.0, T, 0, 0);
-    pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col), desc);
+    measure_time(Y = create_matrix(proc_row, proc_col, m, n, block_row, block_col));
+    measure_time(pdlaset_wrap('A', T->global_row, T->global_col, 0.0, 0.0, T, 0, 0));
+    measure_time(pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col), desc));
 
     // set(T, 0, 0, tau[0]);
-    set(T, 0, 0, val);
+    measure_time(set(T, 0, 0, val));
     // print_matrix("T=", T, rank);
     measure_time(pdgemr2d_wrap(m, n, matrix, row, col, Y, 0, 0));
-    pdlaset_wrap('U', Y->global_row, Y->global_col, 0.0, 1.0, Y, 0, 0);
+    measure_time(pdlaset_wrap('U', Y->global_row, Y->global_col, 0.0, 1.0, Y, 0, 0));
     Matrix *y;
     Matrix *z;
     Matrix *tmp;
 
-    y = create_matrix(proc_row, proc_col, m, n, block_row, block_col);
-    z = create_matrix(proc_row, proc_col, n, 1, block_row, block_col);
-    tmp = create_matrix(proc_row, proc_col, n, 1, block_row, block_col);
+    measure_time(y = create_matrix(proc_row, proc_col, m, n, block_row, block_col));
+    measure_time(z = create_matrix(proc_row, proc_col, n, 1, block_row, block_col));
+    measure_time(tmp = create_matrix(proc_row, proc_col, n, 1, block_row, block_col));
 
     measure_time(pdgemr2d_wrap(m, n, matrix, row, col, y, 0, 0));
-    pdlaset_wrap('U', y->global_row, y->global_col, 0.0, 1.0, y, 0, 0);
+    measure_time(pdlaset_wrap('U', y->global_row, y->global_col, 0.0, 1.0, y, 0, 0));
     for (int j = 1; j < n; j++)
     {
         // (pdlaset_wrap('A', j, 1, 0.0, 0.0, y, 0, 0));
@@ -334,7 +341,7 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
         // (pdgemr2d_wrap(m - j - 1, 1, matrix, row + j + 1, col + j, y, j + 1, 0));
         // // measure_time(pdgemm_wrap('T', 'N', j, 1, m, 1.0, Y, 0, 0, y, 0, 0, 0.0, tmp, 0, 0));
         measure_time(pdgemv_wrap('T', m, j, 1.0, Y, 0, 0, y, 0, j, 1, 0.0, tmp, 0, 0, 1));
-        pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc);
+        measure_time(pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc));
         // printf("%lf ", val);
         measure_time(pdgemv_wrap('N', j, j, -val, T, 0, 0, tmp, 0, 0, 1, 0.0, T, 0, j, 1));
         // measure_time(pdgemm_wrap('N', 'N', j, 1, j, -val, T, 0, 0, tmp, 0, 0, 0.0, z, 0, 0));
@@ -343,15 +350,15 @@ void pdgeqrt_wrap(int rank, int proc_row, int proc_col, int m, int n, Matrix *ma
         // print_matrix("z=", z, rank);
         // (pdgemr2d_wrap(m, 1, y, 0, 0, Y, 0, j));
         // measure_time(pdgemr2d_wrap(j, 1, z, 0, 0, T, 0, j));
-        pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc);
+        measure_time(pdelget_(ADDR(char, 'A'), ADDR(char, ' '), &val, tau, ADDR(int, 1), ADDR(int, 1 + col + j), desc));
         // val=3.14;
-        set(T, j, j, val);
+        measure_time(set(T, j, j, val));
     }
-    free_matrix(tmp);
-    free_matrix(z);
-    free_matrix(y);
-    free_matrix(Y);
-    free(tau);
+    measure_time(free_matrix(tmp));
+    measure_time(free_matrix(z));
+    measure_time(free_matrix(y));
+    measure_time(free_matrix(Y));
+    measure_time(free(tau));
 }
 
 bool can_TSQR(int m, int n)
@@ -370,12 +377,19 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
     assert(MIN(N, L) >= nb && nb >= 1);
     assert(ldt_iter >= nb);
     assert(N % L == 0);
-    Matrix *T_iter = create_matrix(nproc_row, nproc_col, L, L, block_col, block_row);
-    Matrix *V = create_matrix(nproc_row, nproc_col, N - L, L, block_row, block_col);
-    Matrix *update_tmp = create_matrix(nproc_row, nproc_col, N - L, N - L, block_row, block_col);
-    Matrix *update_P = create_matrix(nproc_row, nproc_col, N - L, L, block_row, block_col);
-    Matrix *update_beta = create_matrix(nproc_row, nproc_col, L, L, block_row, block_col);
-    Matrix *update_Q = create_matrix(nproc_row, nproc_col, N - L, L, block_row, block_col);
+
+    Matrix *T_iter;
+    Matrix *V;
+    Matrix *update_tmp;
+    Matrix *update_P;
+    Matrix *update_beta;
+    Matrix *update_Q;
+    measure_time(T_iter = create_matrix(nproc_row, nproc_col, L, L, block_col, block_row));
+    measure_time(V = create_matrix(nproc_row, nproc_col, N - L, L, block_row, block_col));
+    measure_time(update_tmp = create_matrix(nproc_row, nproc_col, N - L, N - L, block_row, block_col));
+    measure_time(update_P = create_matrix(nproc_row, nproc_col, N - L, L, block_row, block_col));
+    measure_time(update_beta = create_matrix(nproc_row, nproc_col, L, L, block_row, block_col));
+    measure_time(update_Q = create_matrix(nproc_row, nproc_col, N - L, L, block_row, block_col));
 
     for (int k = 0; k < N / L - 1; k++)
     {
@@ -433,12 +447,12 @@ void bischof(int rank, int nproc_row, int nproc_col, int N, int L, Matrix *A, Ma
 
         measure_time(pdsyr2k_wrap('L', 'N', Nk, L, -1.0, V, 0, 0, update_Q, 0, 0, 1.0, A, (k + 1) * L, (k + 1) * L));
     }
-    free_matrix(V);
-    free_matrix(update_P);
-    free_matrix(update_beta);
-    free_matrix(update_Q);
-    free_matrix(update_tmp);
-    free_matrix(T_iter);
+    measure_time(free_matrix(V));
+    measure_time(free_matrix(update_P));
+    measure_time(free_matrix(update_beta));
+    measure_time(free_matrix(update_Q));
+    measure_time(free_matrix(update_tmp));
+    measure_time(free_matrix(T_iter));
 }
 
 bool is_power_of_2(int n)
@@ -492,20 +506,20 @@ void exchange(int m_total, int n, int m_part, int m_last, int block_num, int hav
 
     int reqs_idx = 0;
     // send 1
-    data_send1 = malloc(m_head * n * sizeof(double));
-    LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_head, n, mat->data, m_total, data_send1, m_head);
+    measure_time(data_send1 = malloc(m_head * n * sizeof(double)));
+    measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_head, n, mat->data, m_total, data_send1, m_head));
 
     measure_time(MPI_Isend(data_send1, m_head * n, MPI_DOUBLE, send1, have1, MPI_COMM_WORLD, &reqs[reqs_idx++]));
     //  recv 1
     m_recv1 = (need1 == block_num - 1) ? m_last : m_part;
-    data_recv1 = malloc(m_recv1 * n * sizeof(double));
+    measure_time(data_recv1 = malloc(m_recv1 * n * sizeof(double)));
     measure_time(MPI_Irecv(data_recv1, m_recv1 * n, MPI_DOUBLE, recv1, need1, MPI_COMM_WORLD, &reqs[reqs_idx++]));
 
     // send 2
     if (send2 != -1)
     {
-        data_send2 = malloc(m_tail * n * sizeof(double));
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_tail, n, &(mat->data[m_head]), m_total, data_send2, m_tail);
+        measure_time(data_send2 = malloc(m_tail * n * sizeof(double)));
+        measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_tail, n, &(mat->data[m_head]), m_total, data_send2, m_tail));
         measure_time(MPI_Isend(data_send2, m_tail * n, MPI_DOUBLE, send2, have2, MPI_COMM_WORLD, &reqs[reqs_idx++]));
     }
 
@@ -513,7 +527,7 @@ void exchange(int m_total, int n, int m_part, int m_last, int block_num, int hav
     if (recv2 != -1)
     {
         m_recv2 = (need2 == block_num - 1) ? m_last : m_part;
-        data_recv2 = malloc(m_recv2 * n * sizeof(double));
+        measure_time(data_recv2 = malloc(m_recv2 * n * sizeof(double)));
         measure_time(MPI_Irecv(data_recv2, m_recv2 * n, MPI_DOUBLE, recv2, need2, MPI_COMM_WORLD, &reqs[reqs_idx++]));
         // printf("recv   [%d] %d \n", rank, m_recv2);
         // printf("mlast   [%d] %d\n", rank, (need2 == block_num - 1) ? m_last : m_part);
@@ -528,34 +542,34 @@ void exchange(int m_total, int n, int m_part, int m_last, int block_num, int hav
     if (recv2 == -1)
     {
         // printf("[%d] %p\n", rank, mat->data);
-        mat->data = realloc(mat->data, (m_recv1)*n * sizeof(double));
+        measure_time(mat->data = realloc(mat->data, (m_recv1)*n * sizeof(double)));
         // printf("[%d] %p\n", rank, mat->data);
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv1, n, data_recv1, m_recv1, mat->data, m_recv1);
+        measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv1, n, data_recv1, m_recv1, mat->data, m_recv1));
         mat->global_row = mat->local_row = mat->leading_dimension = m_recv1;
     }
     else
     {
-        mat->data = realloc(mat->data, (m_recv1 + m_recv2) * n * sizeof(double));
+        measure_time(mat->data = realloc(mat->data, (m_recv1 + m_recv2) * n * sizeof(double)));
 
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv1, n, data_recv1, m_recv1, mat->data, m_recv1 + m_recv2);
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv2, n, data_recv2, m_recv2, &((mat->data)[m_recv1]), m_recv1 + m_recv2);
+        measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv1, n, data_recv1, m_recv1, mat->data, m_recv1 + m_recv2));
+        measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv2, n, data_recv2, m_recv2, &((mat->data)[m_recv1]), m_recv1 + m_recv2));
         mat->global_row = mat->local_row = mat->leading_dimension = m_recv1 + m_recv2;
     }
     if (data_recv1 != NULL)
     {
-        free(data_recv1);
+        measure_time(free(data_recv1));
     }
     if (data_recv2 != NULL)
     {
-        free(data_recv2);
+        measure_time(free(data_recv2));
     }
     if (data_send1 != NULL)
     {
-        free(data_send1);
+        measure_time(free(data_send1));
     }
     if (data_send2 != NULL)
     {
-        free(data_send2);
+        measure_time(free(data_send2));
     }
 }
 
@@ -648,20 +662,20 @@ void exchange2(int m_global, int n, int m_local, Matrix *mat, int rank)
 
     int reqs_idx = 0;
     // send 1
-    data_send1 = malloc(m_head * n * sizeof(double));
-    LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_head, n, mat->data, m_local, data_send1, m_head);
+    measure_time(data_send1 = malloc(m_head * n * sizeof(double)));
+    measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_head, n, mat->data, m_local, data_send1, m_head));
 
     measure_time(MPI_Isend(data_send1, m_head * n, MPI_DOUBLE, send1, have1, MPI_COMM_WORLD, &reqs[reqs_idx++]));
     //  recv 1
     m_recv1 = (need1 == block_num - 1) ? m_last : m_part;
-    data_recv1 = malloc(m_recv1 * n * sizeof(double));
+    measure_time(data_recv1 = malloc(m_recv1 * n * sizeof(double)));
     measure_time(MPI_Irecv(data_recv1, m_recv1 * n, MPI_DOUBLE, recv1, need1, MPI_COMM_WORLD, &reqs[reqs_idx++]));
 
     // send 2
     if (send2 != -1)
     {
-        data_send2 = malloc(m_tail * n * sizeof(double));
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_tail, n, &(mat->data[m_head]), m_local, data_send2, m_tail);
+        measure_time(data_send2 = malloc(m_tail * n * sizeof(double)));
+        measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_tail, n, &(mat->data[m_head]), m_local, data_send2, m_tail));
         measure_time(MPI_Isend(data_send2, m_tail * n, MPI_DOUBLE, send2, have2, MPI_COMM_WORLD, &reqs[reqs_idx++]));
     }
 
@@ -669,7 +683,7 @@ void exchange2(int m_global, int n, int m_local, Matrix *mat, int rank)
     if (recv2 != -1)
     {
         m_recv2 = (need2 == block_num - 1) ? m_last : m_part;
-        data_recv2 = malloc(m_recv2 * n * sizeof(double));
+        measure_time(data_recv2 = malloc(m_recv2 * n * sizeof(double)));
         measure_time(MPI_Irecv(data_recv2, m_recv2 * n, MPI_DOUBLE, recv2, need2, MPI_COMM_WORLD, &reqs[reqs_idx++]));
         // printf("recv   [%d] %d \n", rank, m_recv2);
         // printf("mlast   [%d] %d\n", rank, (need2 == block_num - 1) ? m_last : m_part);
@@ -684,34 +698,34 @@ void exchange2(int m_global, int n, int m_local, Matrix *mat, int rank)
     if (recv2 == -1)
     {
         // printf("[%d] %p\n", rank, mat->data);
-        mat->data = realloc(mat->data, (m_recv1)*n * sizeof(double));
+        measure_time(mat->data = realloc(mat->data, (m_recv1)*n * sizeof(double)));
         // printf("[%d] %p\n", rank, mat->data);
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv1, n, data_recv1, m_recv1, mat->data, m_recv1);
+        measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv1, n, data_recv1, m_recv1, mat->data, m_recv1));
         mat->global_row = mat->local_row = mat->leading_dimension = m_recv1;
     }
     else
     {
-        mat->data = realloc(mat->data, (m_recv1 + m_recv2) * n * sizeof(double));
+        measure_time(mat->data = realloc(mat->data, (m_recv1 + m_recv2) * n * sizeof(double)));
 
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv1, n, data_recv1, m_recv1, mat->data, m_recv1 + m_recv2);
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv2, n, data_recv2, m_recv2, &((mat->data)[m_recv1]), m_recv1 + m_recv2);
+        measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv1, n, data_recv1, m_recv1, mat->data, m_recv1 + m_recv2));
+        measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', m_recv2, n, data_recv2, m_recv2, &((mat->data)[m_recv1]), m_recv1 + m_recv2));
         mat->global_row = mat->local_row = mat->leading_dimension = m_recv1 + m_recv2;
     }
     if (data_recv1 != NULL)
     {
-        free(data_recv1);
+        measure_time(free(data_recv1));
     }
     if (data_recv2 != NULL)
     {
-        free(data_recv2);
+        measure_time(free(data_recv2));
     }
     if (data_send1 != NULL)
     {
-        free(data_send1);
+        measure_time(free(data_send1));
     }
     if (data_send2 != NULL)
     {
-        free(data_send2);
+        measure_time(free(data_send2));
     }
 }
 
@@ -760,13 +774,14 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
             pad = m % proc_num;
         }
     }
-    int m_total = numroc_(&m, &m_part, &rank, ADDR(int, 0), &proc_num);
+    int m_total;
+    measure_time(m_total = numroc_(&m, &m_part, &rank, ADDR(int, 0), &proc_num));
     // printf("[%d] descinit 3 %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_total);
-    descinit_(desc, ADDR(int, m), ADDR(int, n), &m_part, &n, ADDR(int, 0), ADDR(int, 0), &icontext_1d, &m_total, &ierror);
+    measure_time(descinit_(desc, ADDR(int, m), ADDR(int, n), &m_part, &n, ADDR(int, 0), ADDR(int, 0), &icontext_1d, &m_total, &ierror));
     // printf("[%d] done 3 %d %d %d %d %d %d\n", rank, m, n, m_part, n_part, icontext_1d, m_total);
     Matrix mat;
     mat.desc = desc;
-    mat.data = malloc(((size_t)m_total) * (size_t)n_part * sizeof(double));
+    measure_time(mat.data = malloc(((size_t)m_total) * (size_t)n_part * sizeof(double)));
     // printf("[%d] %d %d %d %d\n", rank, m, n, row, col);
     measure_time(pdgemr2d_wrap(m, n, matrix, row, col, &mat, 0, 0));
     int m_last;
@@ -779,7 +794,7 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
         m_last = m % m_part;
     }
     measure_time(exchange(m_total, n, m_part, m_last, block_num, have1, have2, need1, need2, &mat, rank));
-    MPI_Barrier(MPI_COMM_WORLD);
+    measure_time(MPI_Barrier(MPI_COMM_WORLD));
     *data = mat.data;
     *m_ret = mat.global_row;
 }
@@ -787,7 +802,7 @@ void TSQR_init(int rank, int m, int n, Matrix *matrix, int row, int col, double 
 // TODO:冗長な二重ポインタを取り除く
 void TSQR(int id, int m_part, int n_part, double **data, double **Y, size_t **Y_heads, double **R, double **tau)
 {
-    MPI_Barrier(MPI_COMM_WORLD);
+    measure_time(MPI_Barrier(MPI_COMM_WORLD));
     // for (int k = 0; k < proc_num; k++)
     // {
     //     if (k == id)
@@ -808,20 +823,20 @@ void TSQR(int id, int m_part, int n_part, double **data, double **Y, size_t **Y_
     //    printf("m %d n %d proc_num %d\n", m, n, proc_num);
     //   printf("m_part %d n_part %d\n", m_part, n_part);
     assert(m_part >= n_part);
-    *tau = malloc((size_t)n_part * sizeof(double));
+    measure_time(*tau = malloc((size_t)n_part * sizeof(double)));
     size_t tau_size = n_part;
-    *R = calloc(n_part * n_part, sizeof(double));
-    *Y = calloc(m_part * n_part, sizeof(double));
+    measure_time(*R = calloc(n_part * n_part, sizeof(double)));
+    measure_time(*Y = calloc(m_part * n_part, sizeof(double)));
     size_t Y_heads_size = 0;
     *Y_heads = NULL;
-    append(*Y_heads, Y_heads_size, 0);
+    measure_time(append(*Y_heads, Y_heads_size, 0));
     size_t Y_size = m_part * n_part;
 
     int current_blocknum = 1;
-    LAPACKE_dgeqrf(LAPACK_COL_MAJOR, m_part, n_part, *data, m_part, *tau);
-    LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, *data, m_part, *R, n_part);
-    LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'L', m_part, n_part, *data, m_part, *Y, m_part);
-    LAPACKE_dlaset(LAPACK_COL_MAJOR, 'U', m_part, n_part, 0.0, 1.0, *Y, m_part);
+    measure_time(LAPACKE_dgeqrf(LAPACK_COL_MAJOR, m_part, n_part, *data, m_part, *tau));
+    measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, *data, m_part, *R, n_part));
+    measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'L', m_part, n_part, *data, m_part, *Y, m_part));
+    measure_time(LAPACKE_dlaset(LAPACK_COL_MAJOR, 'U', m_part, n_part, 0.0, 1.0, *Y, m_part));
     int k = 1;
     int i = id;
     int p = proc_num;
@@ -832,8 +847,10 @@ void TSQR(int id, int m_part, int n_part, double **data, double **Y, size_t **Y_
         if (i % (1 << k) == 0 && (i + (1 << (k - 1))) < p)
         {
             int j = i + (1 << (k - 1));
-            double *R_tmp = calloc(2 * n_part * n_part, sizeof(double));
-            double *R_rsv = calloc(n_part * n_part, sizeof(double));
+            double *R_tmp;
+            measure_time(R_tmp = calloc(2 * n_part * n_part, sizeof(double)));
+            double *R_rsv;
+            measure_time(R_rsv = calloc(n_part * n_part, sizeof(double)));
             MPI_Status st;
             int ret;
             measure_time(ret = MPI_Recv(R_rsv, n_part * n_part, MPI_DOUBLE, j, 0, MPI_COMM_WORLD, &st));
@@ -841,24 +858,24 @@ void TSQR(int id, int m_part, int n_part, double **data, double **Y, size_t **Y_
             // printf("[%d] recv from %d(%lf)\n", i, j, R_rsv[0]);
             //  write to Y
 
-            *Y = realloc(*Y, (Y_size + n_part * n_part + n_part * n_part) * sizeof(double));
-            LAPACKE_dlaset(LAPACK_COL_MAJOR, 'A', 2 * n_part, n_part, 0.0, 0.0, &((*Y)[Y_size]), 2 * n_part);
+            measure_time(*Y = realloc(*Y, (Y_size + n_part * n_part + n_part * n_part) * sizeof(double)));
+            measure_time(LAPACKE_dlaset(LAPACK_COL_MAJOR, 'A', 2 * n_part, n_part, 0.0, 0.0, &((*Y)[Y_size]), 2 * n_part));
 
-            append(*Y_heads, Y_heads_size, Y_size);
+            measure_time(append(*Y_heads, Y_heads_size, Y_size));
 
-            *tau = realloc(*tau, (tau_size + n_part) * sizeof(double));
+            measure_time(*tau = realloc(*tau, (tau_size + n_part) * sizeof(double)));
             // write to R
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, *R, n_part, &((*Y)[Y_size]), 2 * n_part);
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, R_rsv, n_part, &((*Y)[Y_size + n_part]), 2 * n_part);
+            measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, *R, n_part, &((*Y)[Y_size]), 2 * n_part));
+            measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, R_rsv, n_part, &((*Y)[Y_size + n_part]), 2 * n_part));
 
-            ret = LAPACKE_dgeqrf(LAPACK_COL_MAJOR, 2 * n_part, n_part, &((*Y)[Y_size]), 2 * n_part, &((*tau)[tau_size]));
+            measure_time(ret = LAPACKE_dgeqrf(LAPACK_COL_MAJOR, 2 * n_part, n_part, &((*Y)[Y_size]), 2 * n_part, &((*tau)[tau_size])));
             // printf("[%d] ret = %d\n", i, ret);
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, &((*Y)[Y_size]), 2 * n_part, *R, n_part);
+            measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, &((*Y)[Y_size]), 2 * n_part, *R, n_part));
             // printf("[%d] R %lf\n", i, (*R)[0]);
             Y_size += n_part * n_part * 2;
             tau_size += n_part;
-            free(R_tmp);
-            free(R_rsv);
+            measure_time(free(R_tmp));
+            measure_time(free(R_rsv));
         }
         else if (i % (1 << k) == (1 << (k - 1)))
         {
@@ -867,13 +884,13 @@ void TSQR(int id, int m_part, int n_part, double **data, double **Y, size_t **Y_
             assert(ret == MPI_SUCCESS);
             // printf("[%d] send to %d (%lf)\n", i, i - (1 << (k - 1)), (*R)[0]);
         }
-        MPI_Barrier(MPI_COMM_WORLD);
+        measure_time(MPI_Barrier(MPI_COMM_WORLD));
 
         k++;
     }
-    MPI_Barrier(MPI_COMM_WORLD);
+    measure_time(MPI_Barrier(MPI_COMM_WORLD));
 
-    append(*Y_heads, Y_heads_size, Y_size);
+    measure_time(append(*Y_heads, Y_heads_size, Y_size));
 
     // if (id == -1)
     // {
@@ -901,8 +918,8 @@ void construct_TSQR_Q(int id, int m_part, int n_part, double *Y, size_t *Y_heads
         Q_dim[0] = n_part;
         Q_dim[1] = n_part;
 
-        Q = malloc(Q_dim[0] * Q_dim[1] * sizeof(double));
-        LAPACKE_dlaset(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], 0.0, 1.0, Q, Q_dim[0]);
+        measure_time(Q = malloc(Q_dim[0] * Q_dim[1] * sizeof(double)));
+        measure_time(LAPACKE_dlaset(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], 0.0, 1.0, Q, Q_dim[0]));
     }
     while ((1 << k) < p)
     {
@@ -918,24 +935,25 @@ void construct_TSQR_Q(int id, int m_part, int n_part, double *Y, size_t *Y_heads
             m_Y /= n_part;
             assert(Q_dim[0] <= m_Y);
             double *Q_tmp = calloc(m_Y * n_part, sizeof(double));
-            LAPACKE_dlaset(LAPACK_COL_MAJOR, 'A', m_Y, n_part, 0.0, 0.0, Q_tmp, m_Y);
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], Q, Q_dim[0], Q_tmp, m_Y);
-            LAPACKE_dormqr(LAPACK_COL_MAJOR, 'L', 'N', m_Y, n_part, n_part, &Y[Y_heads[k]], m_Y, &tau[n_part * (k)], Q_tmp, m_Y);
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], Q_tmp, m_Y, Q, Q_dim[0]);
+            measure_time(LAPACKE_dlaset(LAPACK_COL_MAJOR, 'A', m_Y, n_part, 0.0, 0.0, Q_tmp, m_Y));
+            measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], Q, Q_dim[0], Q_tmp, m_Y));
+            measure_time(LAPACKE_dormqr(LAPACK_COL_MAJOR, 'L', 'N', m_Y, n_part, n_part, &Y[Y_heads[k]], m_Y, &tau[n_part * (k)], Q_tmp, m_Y));
+            measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], Q_tmp, m_Y, Q, Q_dim[0]));
             int Q_send_dim[2];
             Q_send_dim[0] = m_Y - Q_dim[0];
             Q_send_dim[1] = Q_dim[1];
             int ret;
             measure_time(ret = MPI_Send(Q_send_dim, 2, MPI_INT, i + (1 << (k - 1)), 0, MPI_COMM_WORLD));
             assert(ret == MPI_SUCCESS);
-            double *Q_send = calloc(Q_send_dim[0] * Q_send_dim[1], sizeof(double));
-            LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_send_dim[0], Q_send_dim[1], &Q_tmp[Q_dim[0]], m_Y, Q_send, Q_send_dim[0]);
+            double *Q_send;
+            measure_time(Q_send = calloc(Q_send_dim[0] * Q_send_dim[1], sizeof(double)));
+            measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_send_dim[0], Q_send_dim[1], &Q_tmp[Q_dim[0]], m_Y, Q_send, Q_send_dim[0]));
 
             measure_time(ret = MPI_Send(Q_send, Q_send_dim[0] * Q_send_dim[1], MPI_DOUBLE, i + (1 << (k - 1)), 0, MPI_COMM_WORLD));
 
             assert(ret == MPI_SUCCESS);
-            free(Q_tmp);
-            free(Q_send);
+            measure_time(free(Q_tmp));
+            measure_time(free(Q_send));
         }
         else if (i % (1 << k) == (1 << (k - 1)))
         {
@@ -944,7 +962,7 @@ void construct_TSQR_Q(int id, int m_part, int n_part, double *Y, size_t *Y_heads
             measure_time(ret = MPI_Recv(Q_dim, 2, MPI_INT, i - (1 << (k - 1)), 0, MPI_COMM_WORLD, &st));
             assert(ret == MPI_SUCCESS);
 
-            Q = realloc(Q, Q_dim[0] * Q_dim[1] * sizeof(double));
+            measure_time(Q = realloc(Q, Q_dim[0] * Q_dim[1] * sizeof(double)));
             measure_time(ret = MPI_Recv(Q, Q_dim[0] * Q_dim[1], MPI_DOUBLE, i - (1 << (k - 1)), 0, MPI_COMM_WORLD, &st));
             assert(ret == MPI_SUCCESS);
         }
@@ -954,8 +972,9 @@ void construct_TSQR_Q(int id, int m_part, int n_part, double *Y, size_t *Y_heads
     assert(m_Y % n_part == 0);
     m_Y /= n_part;
 
-    double *Q_tmp = calloc(m_Y * n_part, sizeof(double));
-    LAPACKE_dlaset(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], 0.0, 0.0, Q_tmp, m_Y);
+    double *Q_tmp;
+    measure_time(Q_tmp = calloc(m_Y * n_part, sizeof(double)));
+    measure_time(LAPACKE_dlaset(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], 0.0, 0.0, Q_tmp, m_Y));
     // printf("------------------------------------\n");
     // printf("[\n");
     // for (int row = 0; row < Q_dim[0]; row++)
@@ -969,7 +988,7 @@ void construct_TSQR_Q(int id, int m_part, int n_part, double *Y, size_t *Y_heads
     // }
     // printf("]");
 
-    LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], Q, Q_dim[0], Q_tmp, m_Y);
+    measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], Q, Q_dim[0], Q_tmp, m_Y));
     // printf("------------------------------------\n");
     // printf("[\n");
     // for (int row = 0; row < m_Y; row++)
@@ -982,10 +1001,10 @@ void construct_TSQR_Q(int id, int m_part, int n_part, double *Y, size_t *Y_heads
     //     printf("],\n");
     // }
     // printf("]");
-    LAPACKE_dormqr(LAPACK_COL_MAJOR, 'L', 'N', m_Y, n_part, n_part, &Y[Y_heads[0]], m_Y, &tau[0], Q_tmp, m_Y);
-    MPI_Barrier(MPI_COMM_WORLD);
+    measure_time(LAPACKE_dormqr(LAPACK_COL_MAJOR, 'L', 'N', m_Y, n_part, n_part, &Y[Y_heads[0]], m_Y, &tau[0], Q_tmp, m_Y));
+    measure_time(MPI_Barrier(MPI_COMM_WORLD));
 
-    free(Q);
+    measure_time(free(Q));
     *Q_ret = Q_tmp;
     return;
     // LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'A', Q_dim[0], Q_dim[1], Q_tmp, m_Y, Q, Q_dim[0]);
@@ -994,7 +1013,8 @@ void construct_TSQR_Q(int id, int m_part, int n_part, double *Y, size_t *Y_heads
 void modified_LU_decomposition(int id, int m_part, int n_part, double *Y, double **S_ret)
 {
     // m is a number of row of ***local*** matrix!
-    double *S = calloc(n_part, sizeof(double));
+    double *S;
+    measure_time(S = calloc(n_part, sizeof(double)));
     if (id == 0)
     {
         for (int i = 0; i < n_part; i++)
@@ -1008,19 +1028,21 @@ void modified_LU_decomposition(int id, int m_part, int n_part, double *Y, double
                 S[i] = -1.0;
             }
             Y[i + i * m_part] -= S[i];
-            cblas_dscal(m_part - 1 - i, 1.0 / Y[i + i * m_part], &Y[i + 1 + i * m_part], 1);
-            cblas_dger(CblasColMajor, m_part - 1 - i, n_part - 1 - i, -1.0, &Y[i + 1 + i * m_part], 1, &Y[i + (i + 1) * m_part], m_part, &Y[i + 1 + (i + 1) * m_part], m_part);
+            measure_time(cblas_dscal(m_part - 1 - i, 1.0 / Y[i + i * m_part], &Y[i + 1 + i * m_part], 1));
+            measure_time(cblas_dger(CblasColMajor, m_part - 1 - i, n_part - 1 - i, -1.0, &Y[i + 1 + i * m_part], 1, &Y[i + (i + 1) * m_part], m_part, &Y[i + 1 + (i + 1) * m_part], m_part));
         }
         *S_ret = S;
-        double *U = malloc(n_part * n_part * sizeof(double));
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, Y, m_part, U, n_part);
+        double *U;
+        measure_time(U = malloc(n_part * n_part * sizeof(double)));
+        measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n_part, n_part, Y, m_part, U, n_part));
         measure_time(MPI_Bcast(U, n_part * n_part, MPI_DOUBLE, 0, MPI_COMM_WORLD));
         measure_time(MPI_Bcast(S, n_part, MPI_DOUBLE, 0, MPI_COMM_WORLD));
-        free(U);
+        measure_time(free(U));
     }
     else
     {
-        double *U = malloc(n_part * n_part * sizeof(double));
+        double *U;
+        measure_time(U = malloc(n_part * n_part * sizeof(double)));
         measure_time(MPI_Bcast(U, n_part * n_part, MPI_DOUBLE, 0, MPI_COMM_WORLD));
         measure_time(MPI_Bcast(S, n_part, MPI_DOUBLE, 0, MPI_COMM_WORLD));
         // printf("[%d] U %lf\n", rank, U[0]);
@@ -1030,8 +1052,8 @@ void modified_LU_decomposition(int id, int m_part, int n_part, double *Y, double
         // printf("[%d] n %d\n", rank, n);
         *S_ret = S;
 
-        cblas_dtrsm(CblasColMajor, CblasRight, CblasUpper, CblasNoTrans, CblasNonUnit, m_part, n_part, 1.0, U, n_part, Y, m_part);
-        free(U);
+        measure_time(cblas_dtrsm(CblasColMajor, CblasRight, CblasUpper, CblasNoTrans, CblasNonUnit, m_part, n_part, 1.0, U, n_part, Y, m_part));
+        measure_time(free(U));
     }
     // free(S);
 }
@@ -1043,11 +1065,11 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
     double *data;
     int rank;
     int nrow, ncol, tmp;
-    blacs_gridinfo_(&icontext_1d, &nrow, &ncol, &rank, &tmp);
+    measure_time(blacs_gridinfo_(&icontext_1d, &nrow, &ncol, &rank, &tmp));
     int m_local;
     measure_time(TSQR_init(rank, m, n, A, row, col, &data, &m_local));
 
-    MPI_Barrier(MPI_COMM_WORLD);
+    measure_time(MPI_Barrier(MPI_COMM_WORLD));
     // for (int p = 0; p < proc_num; p++)
     // {
     //     if (p == rank)
@@ -1075,7 +1097,7 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
     //     // blacs_barrier_(&icontext, ADDR(char, 'A'));
     // }
     id = rank;
-    MPI_Barrier(MPI_COMM_WORLD);
+    measure_time(MPI_Barrier(MPI_COMM_WORLD));
     double *Y, *R, *tau;
     size_t *Y_heads;
     // int m_part = m / proc_num;
@@ -1088,7 +1110,7 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
     measure_time(TSQR(id, m_local, n_part, &data, &Y, &Y_heads, &R, &tau));
 
     // assert(m % proc_num == 0);
-    MPI_Barrier(MPI_COMM_WORLD);
+    measure_time(MPI_Barrier(MPI_COMM_WORLD));
     // if (id == 0)
     // {
     //     printf("R=[\n");
@@ -1108,7 +1130,7 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
     double *Q;
     measure_time(construct_TSQR_Q(id, m_local, n_part, Y, Y_heads, tau, &Q));
 
-    MPI_Barrier(MPI_COMM_WORLD);
+    measure_time(MPI_Barrier(MPI_COMM_WORLD));
     double *S; // = malloc(n * sizeof(double));
     measure_time(modified_LU_decomposition(id, m_local, n, Q, &S));
 
@@ -1116,12 +1138,13 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
     if (id == 0)
     {
 
-        double *SY1 = calloc(n * n, sizeof(double));
-        T = calloc(n * n, sizeof(double));
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'L', n, n, Q, m_local, SY1, n);
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n, n, Q, m_local, T, n);
+        double *SY1;
+        measure_time(SY1 = calloc(n * n, sizeof(double)));
+        measure_time(T = calloc(n * n, sizeof(double)));
+        measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'L', n, n, Q, m_local, SY1, n));
+        measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n, n, Q, m_local, T, n));
 
-        LAPACKE_dtrtri(LAPACK_COL_MAJOR, 'L', 'U', n, SY1, n);
+        measure_time(LAPACKE_dtrtri(LAPACK_COL_MAJOR, 'L', 'U', n, SY1, n));
         for (int i = 0; i < n; i++)
         {
             for (int j = 0; j < n; j++)
@@ -1131,36 +1154,35 @@ void TSQR_HR(int rank_2d, int proc_row_id, int proc_col_id, int m, int n, Matrix
             }
         }
 
-        cblas_dtrmm(CblasColMajor, CblasRight, CblasLower, CblasTrans, CblasUnit, n, n, -1.0, SY1, n, T, n);
-        free(SY1);
-        LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n, n, R, n, Q, m_local);
+        measure_time(cblas_dtrmm(CblasColMajor, CblasRight, CblasLower, CblasTrans, CblasUnit, n, n, -1.0, SY1, n, T, n));
+        measure_time(free(SY1));
+        measure_time(LAPACKE_dlacpy(LAPACK_COL_MAJOR, 'U', n, n, R, n, Q, m_local));
     }
-    MPI_Barrier(MPI_COMM_WORLD);
+    measure_time(MPI_Barrier(MPI_COMM_WORLD));
 
     int desc[DESC_LEN];
     int ierror;
     Matrix mat;
     mat.data = Q;
     measure_time(exchange2(m, n, m_local, &mat, id));
-    int ld = numroc_(&m, ADDR(int, m / proc_num), &rank, ADDR(int, 0), &proc_num);
+    int ld;
+    measure_time(ld = numroc_(&m, ADDR(int, m / proc_num), &rank, ADDR(int, 0), &proc_num));
 
-    descinit_(&desc, ADDR(int, m),
-              ADDR(int, n), ADDR(int, m / proc_num), ADDR(int, n), ADDR(int, 0), ADDR(int, 0), &icontext_1d, ADDR(int, ld), &ierror);
+    measure_time(descinit_(&desc, ADDR(int, m), ADDR(int, n), ADDR(int, m / proc_num), ADDR(int, n), ADDR(int, 0), ADDR(int, 0), &icontext_1d, ADDR(int, ld), &ierror));
     mat.desc = desc;
 
     measure_time(pdgemr2d_wrap(m, n, &mat, 0, 0, A, row, col));
 
-    MPI_Barrier(MPI_COMM_WORLD);
+    measure_time(MPI_Barrier(MPI_COMM_WORLD));
 
     // printf("[%d] descinit 2 %d %d %d %d %d %d\n", rank, n, n, n, n, icontext_1d, n);
-    descinit_(&desc, ADDR(int, n),
-              ADDR(int, n), ADDR(int, n), ADDR(int, n), ADDR(int, 0), ADDR(int, 0), &icontext_1d, ADDR(int, n), &ierror);
+    measure_time(descinit_(&desc, ADDR(int, n), ADDR(int, n), ADDR(int, n), ADDR(int, n), ADDR(int, 0), ADDR(int, 0), &icontext_1d, ADDR(int, n), &ierror));
     // printf("[%d] done 2 %d %d %d %d %d %d\n", rank, n, n, n, n, icontext_1d, n);
     mat.data = T;
     mat.desc = desc;
 
     measure_time(pdgemr2d_wrap(n, n, &mat, 0, 0, T_ret, 0, 0));
-    MPI_Barrier(MPI_COMM_WORLD);
+    measure_time(MPI_Barrier(MPI_COMM_WORLD));
 
     return;
 }

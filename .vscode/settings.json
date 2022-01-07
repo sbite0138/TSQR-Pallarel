@@ -30,5 +30,8 @@
         "cblas.h": "c",
         "openblas_config.h": "c",
         "lapacke.h": "c"
-    }
+    },
+    "C_Cpp.default.defines": [
+        "DEBUG",
+    ],
 }
