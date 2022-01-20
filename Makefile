@@ -10,25 +10,10 @@ OPENBLAS_DIR = ./OpenBLAS-0.3.13
 
 all: band_parallel
 
-
-tsqr_test: tsqr_test.c
-	mpicc  $< -lm -L'/home/sbite/github/scalapack-2.1.0/lib' -lscalapack -lopenblas -llapacke -llapack -lgfortran -g -fopenmp  -std=c11  -o $@
-
-bischof: bischof.c
-	$(CC) -isystem $(OPENBLAS_DIR)/lapack-netlib/LAPACKE/include $< -L$(OPENBLAS_DIR)/lib -lopenblas -lm -o $@
-
-qrprec: qrprec.c
-	$(CC) -isystem $(OPENBLAS_DIR)/lapack-netlib/LAPACKE/include $< -L$(OPENBLAS_DIR)/lib -lopenblas -lm -o $@
-
-parallel: bischof_parallel.c
-	 mpicc bischof_parallel.c -L'/home/sbite/github/scalapack-2.1.0/lib' -lscalapack -llapack -lgfortran  -fopenmp  -g -std=c11  -o $@
-
-
 band_parallel: code.c
 	mpicc  $< -lm -L'/home/sbite/github/scalapack-2.1.0/lib' -lscalapack -lopenblas -llapacke -llapack -lgfortran -g -DDEBUG -fopenmp  -std=c11  -o $@
 
 clean:
-	rm -f qrprec
-	rm -f bischof
+	rm -f band_parallel
 	
 
